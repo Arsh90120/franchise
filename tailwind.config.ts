@@ -14,8 +14,12 @@ const config: Config = {
         text: '#e8eaf0',
       },
       fontFamily: {
-        heading: ['var(--font-barlow)', 'sans-serif'],
-        body: ['var(--font-inter)', 'sans-serif'],
+        heading: ['Barlow Condensed', 'sans-serif'],
+        body: ['Inter', 'sans-serif'],
+      },
+      fontWeight: {
+        '700': '700',
+        '800': '800',
       },
     },
   },
