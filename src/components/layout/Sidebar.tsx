@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useGameState } from '@/lib/game-state';
 import { clsx } from 'clsx';
 
 const nav = [
@@ -16,6 +17,8 @@ const nav = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { selectedTeam, wins, losses, resetGame } = useGameState();
 
   return (
     <aside className="w-56 bg-surface border-r border-border flex flex-col h-full shrink-0">
@@ -23,7 +26,14 @@ export default function Sidebar() {
         <p className="font-heading text-2xl font-800 uppercase tracking-widest">
           <span className="text-orange">Fran</span>chise
         </p>
-        <p className="text-muted text-xs mt-0.5 font-body">GM Mode</p>
+        {selectedTeam ? (
+          <div className="mt-1">
+            <p className="text-text text-xs font-body font-600">{selectedTeam.abbreviation} · {wins}–{losses}</p>
+            <p className="text-muted text-xs font-body">{selectedTeam.conference}ern</p>
+          </div>
+        ) : (
+          <p className="text-muted text-xs mt-0.5 font-body">GM Mode</p>
+        )}
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">
@@ -44,8 +54,14 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <div className="px-5 py-4 border-t border-border">
-        <p className="text-xs text-muted font-body">v0.1.0 — Phase 1</p>
+      <div className="px-4 py-4 border-t border-border space-y-2">
+        <button
+          onClick={() => { resetGame(); router.push('/setup'); }}
+          className="w-full text-xs text-muted hover:text-red-400 font-body transition-colors text-left px-1"
+        >
+          ↩ New Franchise
+        </button>
+        <p className="text-xs text-muted/50 font-body px-1">v0.2.0 — Phase 2</p>
       </div>
     </aside>
   );
