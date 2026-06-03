@@ -1,53 +1,75 @@
-import { getTeamRoster, getPlayerSeasonAverages, getAllTeams } from '@/lib/balldontlie';
+import { ROSTER_DATA } from '@/lib/roster-data';
+import { NBA_TEAMS } from '@/lib/nba-teams';
 import { simGame } from '@/lib/sim-engine';
 import { NextResponse } from 'next/server';
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: { teamId: string } }
 ) {
   try {
-    const opponentId = parseInt(params.teamId);
-
-    const url = new URL(_req.url);
+    const awayId = parseInt(params.teamId);
+    const url = new URL(req.url);
     const homeId = parseInt(url.searchParams.get('homeId') || '0');
 
-    if (!homeId || !opponentId) {
+    if (!homeId || !awayId) {
       return NextResponse.json({ error: 'Missing homeId or teamId' }, { status: 400 });
     }
 
-    const teamsData = await getAllTeams();
-    const homeTeam = teamsData.data.find((t) => t.id === homeId);
-    const awayTeam = teamsData.data.find((t) => t.id === opponentId);
+    const homeTeamInfo = NBA_TEAMS.find((t) => t.id === homeId);
+    const awayTeamInfo = NBA_TEAMS.find((t) => t.id === awayId);
 
-    if (!homeTeam || !awayTeam) {
+    if (!homeTeamInfo || !awayTeamInfo) {
       return NextResponse.json({ error: 'Team not found' }, { status: 404 });
     }
 
-    const [homeRoster, awayRoster] = await Promise.all([
-      getTeamRoster(homeId, 2024),
-      getTeamRoster(opponentId, 2024),
-    ]);
+    const homePlayers = ROSTER_DATA[homeId] ?? [];
+    const awayPlayers = ROSTER_DATA[awayId] ?? [];
 
-    const homePlayerIds = homeRoster.data.map((p) => p.id);
-    const awayPlayerIds = awayRoster.data.map((p) => p.id);
+    // Convert PlayerData to the shape sim-engine expects
+    const toPlayer = (p: typeof homePlayers[0]) => ({
+      id: p.id,
+      first_name: p.first_name,
+      last_name: p.last_name,
+      position: p.position,
+      height: '',
+      weight: '',
+      jersey_number: p.jersey_number,
+      college: '',
+      country: '',
+      draft_year: null,
+      draft_round: null,
+      draft_number: null,
+      team: homeTeamInfo,
+    });
 
-    const [homeAvgs, awayAvgs] = await Promise.all([
-      getPlayerSeasonAverages(homePlayerIds, 2024),
-      getPlayerSeasonAverages(awayPlayerIds, 2024),
-    ]);
+    const toAvg = (p: typeof homePlayers[0]) => ({
+      player_id: p.id,
+      season: 2024,
+      games_played: 60,
+      pts: p.pts,
+      reb: p.reb,
+      ast: p.ast,
+      stl: p.stl,
+      blk: p.blk,
+      turnover: 2.0,
+      fg_pct: p.fg_pct,
+      fg3_pct: p.fg3_pct,
+      ft_pct: p.ft_pct,
+      min: p.min,
+    });
 
     const result = simGame(
-      homeRoster.data,
-      homeAvgs.data,
+      homePlayers.map(toPlayer),
+      homePlayers.map(toAvg),
       homeId,
-      homeTeam.full_name,
-      homeTeam.abbreviation,
-      awayRoster.data,
-      awayAvgs.data,
-      opponentId,
-      awayTeam.full_name,
-      awayTeam.abbreviation
+      homeTeamInfo.full_name,
+      homeTeamInfo.abbreviation,
+      awayPlayers.map(toPlayer),
+      awayPlayers.map(toAvg),
+      awayId,
+      awayTeamInfo.full_name,
+      awayTeamInfo.abbreviation
     );
 
     return NextResponse.json(result);
