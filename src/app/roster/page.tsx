@@ -6,10 +6,9 @@ import { useRouter } from 'next/navigation';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import { ERAS } from '@/lib/nba-teams';
-import { parseBBGM, BBGM_TID_TO_ABB, calcOvr } from '@/lib/bbgm-parser';
+import { parseBBGM, BBGM_TID_TO_ABB } from '@/lib/bbgm-parser';
 import type { BBGMPlayer } from '@/lib/bbgm-parser';
 
-// Legacy BDL types
 interface Player {
   id: number;
   first_name: string;
@@ -42,16 +41,14 @@ function ovrColor(ovr: number) {
   if (ovr >= 60) return 'text-green-400';
   return 'text-muted';
 }
-function fmtHeight(hgt: number) {
-  return `${Math.floor(hgt / 12)}'${hgt % 12}"`;
-}
+function fmtHeight(hgt: number) { return `${Math.floor(hgt / 12)}'${hgt % 12}"`; }
 function fmtContract(amount: string | number) {
   const n = typeof amount === 'string' ? parseFloat(amount) : amount;
   if (!n) return '—';
   return `$${(n / 1000).toFixed(1)}M`;
 }
 
-// BBGM era slug → public JSON path
+// NOTE: filename must match exactly what is in public/data/
 const BBGM_ERA_FILE: Record<string, string> = {
   'classic-1985':  '/data/NBA.Legacy.1985.v3.0.beta.json',
   'jordan-1996':   '/data/1995-96.NBA.Roster.json',
@@ -61,7 +58,7 @@ const BBGM_ERA_FILE: Record<string, string> = {
   'bubble-2020':   '/data/2020-21.NBA.Roster.json',
   'modern-2022':   '/data/2022-23.NBA.Roster.json',
   'modern-2024':   '/data/2024-25.NBA.Roster.json',
-  'current-2025':  '/data/2025-26.NBA.Roster.json',
+  'current-2025':  '/data/2025-26.NBA.Roster 3.json',
 };
 
 const BBGM_ERA_SLUGS = new Set(Object.keys(BBGM_ERA_FILE));
@@ -81,7 +78,6 @@ export default function RosterPage() {
   const eraLabel = ERAS.find((e) => e.id === selectedEra)?.label ?? 'Modern';
   const isBBGM   = BBGM_ERA_SLUGS.has(selectedEra);
 
-  // ── BBGM: fetch JSON from /public/data/ and parse client-side ──────────────
   useEffect(() => {
     if (!isBBGM) return;
     if (!isSetupComplete) { router.push('/setup'); return; }
@@ -90,18 +86,12 @@ export default function RosterPage() {
 
     const url = BBGM_ERA_FILE[selectedEra];
     fetch(url)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`); return r.json(); })
       .then((json) => {
         const roster = parseBBGM(json);
-        // Find the tid for this team's abbreviation
-        const tidEntry = Object.entries(BBGM_TID_TO_ABB).find(
-          ([, abb]) => abb === selectedTeam.abbreviation
-        );
+        const tidEntry = Object.entries(BBGM_TID_TO_ABB).find(([, abb]) => abb === selectedTeam.abbreviation);
         if (!tidEntry) {
-          setError(`No BBGM team mapping for ${selectedTeam.abbreviation}`);
+          setError(`No BBGM mapping for ${selectedTeam.abbreviation}`);
           setLoading(false);
           return;
         }
@@ -115,12 +105,11 @@ export default function RosterPage() {
       })
       .catch((e) => {
         console.error('BBGM fetch error:', e);
-        setError('Could not load roster JSON. Make sure JSON files are in /public/data/.');
+        setError(`Could not load ${url}`);
         setLoading(false);
       });
   }, [selectedTeam, isSetupComplete, router, selectedEra, isBBGM]);
 
-  // ── BDL legacy fetch ────────────────────────────────────────────────────────
   useEffect(() => {
     if (isBBGM) return;
     if (!isSetupComplete) { router.push('/setup'); return; }
@@ -164,7 +153,6 @@ export default function RosterPage() {
     </div>
   );
 
-  // ── BBGM table ──────────────────────────────────────────────────────────────
   if (isBBGM) {
     return (
       <div className="space-y-6">
@@ -214,7 +202,6 @@ export default function RosterPage() {
     );
   }
 
-  // ── BDL legacy table ────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
       {header}
