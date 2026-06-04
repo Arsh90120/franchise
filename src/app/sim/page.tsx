@@ -52,7 +52,10 @@ const WEEKS = Array.from({ length: 26 }, (_, i) => i + 1);
 
 export default function SimPage() {
   const router = useRouter();
-  const { selectedTeam, isSetupComplete, schedule, currentGameIndex, recordGameResult, advanceGame, wins, losses } = useGameState();
+  const {
+    selectedTeam, isSetupComplete, schedule, currentGameIndex,
+    recordGameResult, advanceGame, wins, losses, selectedEra,
+  } = useGameState();
   const [result, setResult] = useState<BoxScoreResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState<'schedule' | 'result'>('schedule');
@@ -71,7 +74,8 @@ export default function SimPage() {
     try {
       const homeId = currentGame.isHome ? selectedTeam.id : currentGame.opponentId;
       const awayId = currentGame.isHome ? currentGame.opponentId : selectedTeam.id;
-      const res = await fetch(`/api/sim/${awayId}?homeId=${homeId}`);
+      // Pass era so the sim engine uses the correct BBGM roster
+      const res = await fetch(`/api/sim/${awayId}?homeId=${homeId}&era=${encodeURIComponent(selectedEra)}`);
       const data: BoxScoreResult = await res.json();
 
       const myScore = currentGame.isHome ? data.homeTeam.totalPoints : data.awayTeam.totalPoints;
@@ -91,8 +95,6 @@ export default function SimPage() {
   }
 
   const weekGames = schedule.filter((g) => g.week === selectedWeek);
-  const didWin = result && currentGameIndex > 0 &&
-    schedule[currentGameIndex - 1]?.result === 'W';
 
   const gamesPlayed = schedule.filter((g) => g.result).length;
   const gamesRemaining = 82 - gamesPlayed;
@@ -116,7 +118,6 @@ export default function SimPage() {
 
       {view === 'schedule' && (
         <div className="space-y-4">
-          {/* Next Game Card */}
           {currentGame && gamesRemaining > 0 && (
             <Card accent="orange">
               <div className="flex items-center justify-between">
@@ -148,13 +149,11 @@ export default function SimPage() {
             </Card>
           )}
 
-          {/* Week Selector */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-muted text-xs font-body">Week:</span>
             {WEEKS.map((w) => {
               const wGames = schedule.filter((g) => g.week === w);
               const done = wGames.every((g) => g.result);
-              const active = wGames.some((g) => !g.result) && wGames.some((g, i, arr) => i === 0 || arr[i-1].result);
               return (
                 <button
                   key={w}
@@ -172,7 +171,6 @@ export default function SimPage() {
             })}
           </div>
 
-          {/* Week Games Table */}
           <Card>
             <p className="section-title mb-3">Week {selectedWeek}</p>
             <div className="space-y-2">
