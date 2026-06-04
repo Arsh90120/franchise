@@ -1,7 +1,7 @@
 import { ROSTER_DATA } from '@/lib/roster-data';
 import { NBA_TEAMS } from '@/lib/nba-teams';
 import { simGame } from '@/lib/sim-engine';
-import { parseBBGM, BBGM_TID_TO_ABB } from '@/lib/bbgm-parser';
+import { parseBBGM, BBGM_TID_TO_ABB, BBGMRatings } from '@/lib/bbgm-parser';
 import { NextResponse } from 'next/server';
 
 const BBGM_ERA_FILE: Record<string, string> = {
@@ -17,33 +17,30 @@ const BBGM_ERA_FILE: Record<string, string> = {
 };
 
 /** Convert BBGM ratings (0-100) into realistic NBA season-average equivalents */
-function ratingsToAvg(p: { id: number; ratings: Record<string, number>[]; pos: string; ovr: number }) {
-  const r = p.ratings[0] ?? {};
-  // Scale ratings to realistic stat ranges
+function ratingsToAvg(id: number, r: BBGMRatings, ovr: number) {
   const pts  = ((r.ins ?? 50) * 0.10 + (r.fg ?? 50) * 0.08 + (r.tp ?? 50) * 0.06) * 0.55 + 2;
   const reb  = ((r.reb ?? 50) * 0.12 + (r.hgt ?? 50) * 0.05) * 0.35 + 1;
   const ast  = ((r.pss ?? 50) * 0.10 + (r.drb ?? 50) * 0.03) * 0.25 + 0.5;
   const stl  = (r.stl ?? 50) * 0.025;
   const blk  = (r.blk ?? 50) * 0.020;
-  const fgPct = 0.38 + (r.fg ?? 50) / 100 * 0.20;
-  const ftPct = 0.55 + (r.ft ?? 50) / 100 * 0.30;
-  const fg3Pct = 0.25 + (r.tp ?? 50) / 100 * 0.20;
-  // minutes based on OVR
-  const mins = 12 + (p.ovr / 100) * 24;
+  const fgPct  = 0.38 + (r.fg  ?? 50) / 100 * 0.20;
+  const ftPct  = 0.55 + (r.ft  ?? 50) / 100 * 0.30;
+  const fg3Pct = 0.25 + (r.tp  ?? 50) / 100 * 0.20;
+  const mins   = 12 + (ovr / 100) * 24;
   return {
-    player_id: p.id,
-    season: 2024,
+    player_id:   id,
+    season:      2024,
     games_played: 60,
-    pts:   Math.min(35, Math.max(2,  pts)),
-    reb:   Math.min(15, Math.max(1,  reb)),
-    ast:   Math.min(12, Math.max(0.5, ast)),
-    stl:   Math.min(3,  Math.max(0.1, stl)),
-    blk:   Math.min(3,  Math.max(0.1, blk)),
-    turnover: 1.5 + (p.ovr / 100) * 1.5,
+    pts:    Math.min(35, Math.max(2,   pts)),
+    reb:    Math.min(15, Math.max(1,   reb)),
+    ast:    Math.min(12, Math.max(0.5, ast)),
+    stl:    Math.min(3,  Math.max(0.1, stl)),
+    blk:    Math.min(3,  Math.max(0.1, blk)),
+    turnover: 1.5 + (ovr / 100) * 1.5,
     fg_pct:  Math.min(0.65, Math.max(0.30, fgPct)),
     fg3_pct: Math.min(0.45, Math.max(0.20, fg3Pct)),
     ft_pct:  Math.min(0.95, Math.max(0.45, ftPct)),
-    min: String(Math.round(mins)),
+    min:     String(Math.round(mins)),
   };
 }
 
@@ -51,7 +48,6 @@ async function getBBGMRoster(era: string, teamAbb: string) {
   const fileName = BBGM_ERA_FILE[era];
   if (!fileName) return null;
 
-  // Fetch from public/data/ using the internal Vercel URL
   const baseUrl = process.env.VERCEL_URL
     ? `https://${process.env.VERCEL_URL}`
     : 'http://localhost:3000';
@@ -85,7 +81,7 @@ async function getBBGMRoster(era: string, teamAbb: string) {
         draft_number: null,
         team: null,
       },
-      avg: ratingsToAvg({ id: i + 1, ratings: p.ratings as Record<string, number>[], pos: p.pos, ovr: p.ovr }),
+      avg: ratingsToAvg(i + 1, p.ratings[0] ?? ({} as BBGMRatings), p.ovr),
     }));
 }
 
@@ -129,7 +125,6 @@ export async function GET(
       awayPlayers = awayRoster.map((x) => x.player);
       awayAvgs    = awayRoster.map((x) => x.avg);
     } else {
-      // Legacy hardcoded roster
       const hd = ROSTER_DATA[homeId] ?? [];
       const ad = ROSTER_DATA[awayId] ?? [];
       const toPlayer = (p: typeof hd[0]) => ({ id: p.id, first_name: p.first_name, last_name: p.last_name, position: p.position, height: '', weight: '', jersey_number: p.jersey_number, college: '', country: '', draft_year: null, draft_round: null, draft_number: null, team: null });
