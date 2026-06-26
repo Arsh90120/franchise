@@ -79,6 +79,7 @@ export function parseBBGM(json: { startingSeason: number; players: Record<string
         ovr,
       };
     });
+
   return { startingSeason: json.startingSeason, players };
 }
 
