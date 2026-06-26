@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useGameState } from '@/lib/game-state';
 import Card from '@/components/ui/Card';
+import clsx from 'clsx';
 
 export default function DashboardPage() {
   const router = useRouter();
