@@ -5,13 +5,18 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: '#0a0c11',
-        surface: '#13161e',
-        border: '#1e2230',
-        orange: '#f7501e',
-        gold: '#f5c518',
-        muted: '#6b7280',
-        text: '#e8eaf0',
+        background: '#050608',
+        surface: '#0f1117',
+        'surface-light': '#1a1d26',
+        border: '#2a2e3a',
+        orange: '#ff4d00',
+        'orange-bright': '#ff6b2b',
+        gold: '#ffcc00',
+        'gold-bright': '#ffe066',
+        muted: '#8a8f9d',
+        text: '#f2f4f7',
+        '2k-blue': '#00a2ff',
+        '2k-red': '#ff003c',
       },
       fontFamily: {
         heading: ['Barlow Condensed', 'sans-serif'],
