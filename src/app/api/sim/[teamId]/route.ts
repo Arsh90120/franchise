@@ -1,8 +1,10 @@
 import { ROSTER_DATA } from '@/lib/roster-data';
 import { NBA_TEAMS } from '@/lib/nba-teams';
 import { simGame } from '@/lib/sim-engine';
-import { parseBBGM, BBGM_TID_TO_ABB, BBGMRatings } from '@/lib/bbgm-parser';
+import { parseBBGM, BBGM_TID_TO_ABB, BBGMRatings, BBGMPlayer, BBGMRoster } from '@/lib/bbgm-parser';
 import { NextResponse } from 'next/server';
+import path from 'path';
+import fs from 'fs/promises';
 
 const BBGM_ERA_FILE: Record<string, string> = {
   'classic-1985':  'NBA.Legacy.1985.v3.0.beta.json',
@@ -44,25 +46,12 @@ function ratingsToAvg(id: number, r: BBGMRatings, ovr: number) {
   };
 }
 
-async function getBBGMRoster(era: string, teamAbb: string) {
-  const fileName = BBGM_ERA_FILE[era];
-  if (!fileName) return null;
+// In-memory cache for parsed BBGM rosters to avoid redundant I/O and parsing.
+const eraCache = new Map<string, BBGMRoster>();
 
-  const baseUrl = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : 'http://localhost:3000';
-
-  const res = await fetch(`${baseUrl}/data/${encodeURIComponent(fileName)}`);
-  if (!res.ok) throw new Error(`Failed to fetch ${fileName}: ${res.status}`);
-  const json = await res.json();
-  const roster = parseBBGM(json);
-
-  const tidEntry = Object.entries(BBGM_TID_TO_ABB).find(([, abb]) => abb === teamAbb);
-  if (!tidEntry) return [];
-  const tid = parseInt(tidEntry[0]);
-
-  return roster.players
-    .filter((p) => p.tid === tid)
+/** Helper to convert filtered BBGM players into simulation format */
+function formatBBGMPlayers(players: BBGMPlayer[]) {
+  return players
     .sort((a, b) => b.ovr - a.ovr)
     .slice(0, 10)
     .map((p, i) => ({
@@ -113,17 +102,35 @@ export async function GET(
     let awayAvgs:    typeof homeAvgs;
 
     if (isBBGM) {
-      const [homeRoster, awayRoster] = await Promise.all([
-        getBBGMRoster(era, homeTeamInfo.abbreviation),
-        getBBGMRoster(era, awayTeamInfo.abbreviation),
-      ]);
-      if (!homeRoster || !awayRoster) {
-        return NextResponse.json({ error: 'Could not load BBGM roster' }, { status: 500 });
+      const fileName = BBGM_ERA_FILE[era];
+      if (!fileName) {
+        return NextResponse.json({ error: 'Invalid era' }, { status: 400 });
       }
-      homePlayers = homeRoster.map((x) => x.player);
-      homeAvgs    = homeRoster.map((x) => x.avg);
-      awayPlayers = awayRoster.map((x) => x.player);
-      awayAvgs    = awayRoster.map((x) => x.avg);
+
+      let roster = eraCache.get(era);
+      if (!roster) {
+        const filePath = path.join(process.cwd(), 'public', 'data', fileName);
+        const raw = await fs.readFile(filePath, 'utf-8');
+        const json = JSON.parse(raw);
+        roster = parseBBGM(json);
+        eraCache.set(era, roster);
+      }
+
+      const getTid = (abb: string) => {
+        const entry = Object.entries(BBGM_TID_TO_ABB).find(([, a]) => a === abb);
+        return entry ? parseInt(entry[0]) : -1;
+      };
+
+      const homeTid = getTid(homeTeamInfo.abbreviation);
+      const awayTid = getTid(awayTeamInfo.abbreviation);
+
+      const homeBBGM = formatBBGMPlayers(roster.players.filter(p => p.tid === homeTid));
+      const awayBBGM = formatBBGMPlayers(roster.players.filter(p => p.tid === awayTid));
+
+      homePlayers = homeBBGM.map((x) => x.player);
+      homeAvgs    = homeBBGM.map((x) => x.avg);
+      awayPlayers = awayBBGM.map((x) => x.player);
+      awayAvgs    = awayBBGM.map((x) => x.avg);
     } else {
       const hd = ROSTER_DATA[homeId] ?? [];
       const ad = ROSTER_DATA[awayId] ?? [];
