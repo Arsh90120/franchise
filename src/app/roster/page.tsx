@@ -130,14 +130,19 @@ export default function RosterPage() {
   function getAvg(id: number) { return averages.find((a) => a.player_id === id); }
 
   const header = (
-    <div>
-      <p className="section-title">Front Office</p>
-      <h1 className="font-heading text-4xl font-bold uppercase mt-1">
-        {selectedTeam?.city} <span className="text-orange">{selectedTeam?.name}</span>
+    <div className="relative">
+      <div className="absolute -left-6 top-0 w-1 h-16 bg-orange" />
+      <p className="section-title italic tracking-[0.3em]">Personnel Management // Roster</p>
+      <h1 className="font-heading text-5xl font-800 uppercase italic tracking-tighter leading-none">
+        {selectedTeam?.city} <span className="text-orange text-glow-orange">{selectedTeam?.name}</span>
       </h1>
-      <p className="text-muted text-sm font-body mt-1">
-        {eraLabel} · {selectedSeason}–{selectedSeason + 1} · {isBBGM ? bbgmPlayers.length : players.length} Players
-      </p>
+      <div className="flex items-center gap-3 mt-3">
+        <Badge label={eraLabel} variant="orange" />
+        <Badge label={`${selectedSeason}–${selectedSeason + 1}`} variant="muted" />
+        <span className="text-muted text-[10px] font-heading font-bold uppercase italic tracking-widest ml-1">
+          {isBBGM ? bbgmPlayers.length : players.length} Active Personnel
+        </span>
+      </div>
     </div>
   );
 
@@ -155,18 +160,18 @@ export default function RosterPage() {
 
   if (isBBGM) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-8 pb-12">
         {header}
-        <Card>
+        <Card className="!p-0 overflow-hidden">
           {bbgmPlayers.length === 0 ? (
-            <p className="text-muted text-sm font-body py-8 text-center">No players found for {selectedTeam?.abbreviation} in this era.</p>
+            <p className="text-muted text-sm font-heading font-bold uppercase italic py-12 text-center">No active personnel found.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-border">
+                  <tr className="bg-white/5 border-b border-white/10">
                     {['Player','Pos','OVR','HT','WT','SPD','STR','JMP','FG','3PT','FT','BLK','STL','REB','Contract'].map((h) => (
-                      <th key={h} className="text-left text-muted font-body font-normal py-2 pr-3 last:pr-0 whitespace-nowrap">{h}</th>
+                      <th key={h} className="text-left text-muted font-heading font-800 uppercase italic py-4 px-4 whitespace-nowrap tracking-widest">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -174,22 +179,24 @@ export default function RosterPage() {
                   {bbgmPlayers.map((p, i) => {
                     const rt = p.ratings[0];
                     return (
-                      <tr key={i} className="border-b border-border/50 hover:bg-surface/50 transition-colors">
-                        <td className="py-3 pr-3 font-heading font-bold text-text whitespace-nowrap">{p.name}</td>
-                        <td className="py-3 pr-3"><Badge label={p.pos || '—'} variant={positionColor(p.pos || '')} /></td>
-                        <td className={`py-3 pr-3 font-heading font-bold text-base ${ovrColor(p.ovr)}`}>{p.ovr}</td>
-                        <td className="py-3 pr-3 text-muted font-body">{fmtHeight(p.hgt)}</td>
-                        <td className="py-3 pr-3 text-muted font-body">{p.weight}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.spd ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.stre ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.jmp ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.fg ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.tp ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.ft ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.blk ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.stl ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.reb ?? '—'}</td>
-                        <td className="py-3 text-muted font-body whitespace-nowrap">{fmtContract(p.contract.amount)} / {p.contract.exp}</td>
+                      <tr key={i} className="border-b border-white/5 hover:bg-orange/5 transition-colors group">
+                        <td className="py-4 px-4 font-heading font-800 text-sm text-white whitespace-nowrap italic group-hover:text-orange transition-colors">
+                          {p.name.toUpperCase()}
+                        </td>
+                        <td className="py-4 px-4"><Badge label={p.pos || '—'} variant={positionColor(p.pos || '')} /></td>
+                        <td className={`py-4 px-4 font-heading font-900 text-lg italic ${ovrColor(p.ovr)}`}>{p.ovr}</td>
+                        <td className="py-4 px-4 text-muted font-heading font-bold">{fmtHeight(p.hgt)}</td>
+                        <td className="py-4 px-4 text-muted font-heading font-bold">{p.weight}</td>
+                        <td className="py-4 px-4 font-heading font-bold text-white/80">{rt?.spd ?? '—'}</td>
+                        <td className="py-4 px-4 font-heading font-bold text-white/80">{rt?.stre ?? '—'}</td>
+                        <td className="py-4 px-4 font-heading font-bold text-white/80">{rt?.jmp ?? '—'}</td>
+                        <td className="py-4 px-4 font-heading font-bold text-white/80">{rt?.fg ?? '—'}</td>
+                        <td className="py-4 px-4 font-heading font-bold text-white/80">{rt?.tp ?? '—'}</td>
+                        <td className="py-4 px-4 font-heading font-bold text-white/80">{rt?.ft ?? '—'}</td>
+                        <td className="py-4 px-4 font-heading font-bold text-white/80">{rt?.blk ?? '—'}</td>
+                        <td className="py-4 px-4 font-heading font-bold text-white/80">{rt?.stl ?? '—'}</td>
+                        <td className="py-4 px-4 font-heading font-bold text-white/80">{rt?.reb ?? '—'}</td>
+                        <td className="py-4 px-4 text-muted font-heading font-bold whitespace-nowrap italic">{fmtContract(p.contract.amount)} / {p.contract.exp}</td>
                       </tr>
                     );
                   })}
@@ -203,18 +210,18 @@ export default function RosterPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 pb-12">
       {header}
-      <Card>
+      <Card className="!p-0 overflow-hidden">
         {players.length === 0 ? (
-          <p className="text-muted text-sm font-body py-8 text-center">No players found.</p>
+          <p className="text-muted text-sm font-heading font-bold uppercase italic py-12 text-center">No players found.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-border">
+                <tr className="bg-white/5 border-b border-white/10">
                   {['#','Player','Pos','PPG','RPG','APG','FG%','MIN'].map((h) => (
-                    <th key={h} className="text-left text-muted font-body font-normal py-2 pr-4 last:pr-0">{h}</th>
+                    <th key={h} className="text-left text-muted font-heading font-800 uppercase italic py-4 px-4 whitespace-nowrap tracking-widest">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -222,15 +229,17 @@ export default function RosterPage() {
                 {players.map((p) => {
                   const avg = getAvg(p.id);
                   return (
-                    <tr key={p.id} className="border-b border-border/50 hover:bg-surface/50 transition-colors">
-                      <td className="py-3 pr-4 text-muted font-body">{p.jersey_number || '—'}</td>
-                      <td className="py-3 pr-4 font-heading font-bold text-text">{p.first_name} {p.last_name}</td>
-                      <td className="py-3 pr-4"><Badge label={p.position || '—'} variant={positionColor(p.position || '')} /></td>
-                      <td className="py-3 pr-4 font-heading font-bold">{avg?.pts?.toFixed(1) ?? '—'}</td>
-                      <td className="py-3 pr-4 font-heading font-bold">{avg?.reb?.toFixed(1) ?? '—'}</td>
-                      <td className="py-3 pr-4 font-heading font-bold">{avg?.ast?.toFixed(1) ?? '—'}</td>
-                      <td className="py-3 pr-4 text-muted font-body">{avg?.fg_pct ? (avg.fg_pct * 100).toFixed(1) + '%' : '—'}</td>
-                      <td className="py-3 text-muted font-body">{avg?.min ?? '—'}</td>
+                    <tr key={p.id} className="border-b border-white/5 hover:bg-orange/5 transition-colors group">
+                      <td className="py-4 px-4 text-muted font-heading font-bold">{p.jersey_number || '—'}</td>
+                      <td className="py-4 px-4 font-heading font-800 text-sm text-white italic group-hover:text-orange transition-colors">
+                        {p.first_name.toUpperCase()} {p.last_name.toUpperCase()}
+                      </td>
+                      <td className="py-4 px-4"><Badge label={p.position || '—'} variant={positionColor(p.position || '')} /></td>
+                      <td className="py-4 px-4 font-heading font-900 text-lg italic text-white">{avg?.pts?.toFixed(1) ?? '—'}</td>
+                      <td className="py-4 px-4 font-heading font-bold text-white/80">{avg?.reb?.toFixed(1) ?? '—'}</td>
+                      <td className="py-4 px-4 font-heading font-bold text-white/80">{avg?.ast?.toFixed(1) ?? '—'}</td>
+                      <td className="py-4 px-4 text-muted font-heading font-bold italic">{avg?.fg_pct ? (avg.fg_pct * 100).toFixed(1) + '%' : '—'}</td>
+                      <td className="py-4 px-4 text-muted font-heading font-bold italic">{avg?.min ?? '—'}</td>
                     </tr>
                   );
                 })}
