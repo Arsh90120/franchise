@@ -1,45 +1,42 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useGameState } from '@/lib/game-state';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import { clsx } from 'clsx';
-import type { BoxScoreResult, PlayerGameLine } from '@/lib/sim-engine';
+import { SimulationEngine, BoxScoreResult, PBPEvent, PlayerGameLine } from '@/lib/sim-engine';
 
 function StatCell({ val }: { val: string | number }) {
-  return <td className="py-2.5 pr-3 text-center font-heading font-bold text-sm">{val}</td>;
+  return <td className="py-2 pr-2 text-center font-heading font-bold text-[11px]">{val}</td>;
 }
 
 function BoxScoreTable({ players, title }: { players: PlayerGameLine[]; title: string }) {
   const sorted = [...players].sort((a, b) => b.points - a.points);
   return (
     <div className="overflow-x-auto">
-      <p className="section-title mb-2">{title}</p>
-      <table className="w-full text-xs min-w-[600px]">
+      <p className="section-title text-[10px] mb-2 uppercase tracking-wider">{title}</p>
+      <table className="w-full text-xs min-w-[500px]">
         <thead>
           <tr className="border-b border-border text-muted">
-            {['Player', 'Pos', 'MIN', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'TO', 'FG', '3P', 'FT'].map((h) => (
-              <th key={h} className={clsx('py-2 font-body font-normal', h === 'Player' ? 'text-left pr-3' : 'text-center pr-3')}>{h}</th>
+            {['Player', 'MIN', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'FG', '3P'].map((h) => (
+              <th key={h} className={clsx('py-1 font-body font-normal text-[10px]', h === 'Player' ? 'text-left' : 'text-center')}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {sorted.map((p) => (
+          {sorted.filter(p => p.minutes > 0).map((p) => (
             <tr key={p.playerId} className="border-b border-border/40 hover:bg-surface/60 transition-colors">
-              <td className="py-2.5 pr-3 font-heading font-bold text-sm whitespace-nowrap">{p.name}</td>
-              <td className="py-2.5 pr-3"><Badge label={p.position || 'F'} variant="muted" /></td>
-              <StatCell val={p.minutes} />
+              <td className="py-1.5 font-heading font-bold text-xs whitespace-nowrap">{p.name}</td>
+              <StatCell val={Math.round(p.minutes)} />
               <StatCell val={p.points} />
               <StatCell val={p.rebounds} />
               <StatCell val={p.assists} />
               <StatCell val={p.steals} />
               <StatCell val={p.blocks} />
-              <StatCell val={p.turnovers} />
               <StatCell val={`${p.fgm}/${p.fga}`} />
               <StatCell val={`${p.threePm}/${p.threePa}`} />
-              <StatCell val={`${p.ftm}/${p.fta}`} />
             </tr>
           ))}
         </tbody>
@@ -53,13 +50,20 @@ const WEEKS = Array.from({ length: 26 }, (_, i) => i + 1);
 export default function SimPage() {
   const router = useRouter();
   const {
-    selectedTeam, isSetupComplete, schedule, currentGameIndex,
-    recordGameResult, advanceGame, wins, losses, selectedEra,
+    selectedTeamId, isSetupComplete, schedule, currentGameIndex,
+    recordGameResult, advanceGame, wins, losses, players, rotations, teams
   } = useGameState();
-  const [result, setResult] = useState<BoxScoreResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [view, setView] = useState<'schedule' | 'result'>('schedule');
+
+  const [simResult, setSimResult] = useState<BoxScoreResult | null>(null);
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [view, setView] = useState<'schedule' | 'live' | 'boxscore'>('schedule');
+  const [livePBP, setLivePBP] = useState<PBPEvent[]>([]);
+  const [liveHomeScore, setLiveHomeScore] = useState(0);
+  const [liveAwayScore, setLiveAwayScore] = useState(0);
+  const [pbpIndex, setPbpIndex] = useState(0);
   const [selectedWeek, setSelectedWeek] = useState(1);
+
+  const pbpEndRef = useRef<HTMLDivElement>(null);
 
   const currentGame = schedule[currentGameIndex];
 
@@ -68,34 +72,69 @@ export default function SimPage() {
     if (currentGame) setSelectedWeek(currentGame.week);
   }, [isSetupComplete, router, currentGame]);
 
-  async function handleSim() {
-    if (!currentGame || !selectedTeam) return;
-    setLoading(true);
-    try {
-      const homeId = currentGame.isHome ? selectedTeam.id : currentGame.opponentId;
-      const awayId = currentGame.isHome ? currentGame.opponentId : selectedTeam.id;
-      // Pass era so the sim engine uses the correct BBGM roster
-      const res = await fetch(`/api/sim/${awayId}?homeId=${homeId}&era=${encodeURIComponent(selectedEra)}`);
-      const data: BoxScoreResult = await res.json();
-
-      const myScore = currentGame.isHome ? data.homeTeam.totalPoints : data.awayTeam.totalPoints;
-      const oppScore = currentGame.isHome ? data.awayTeam.totalPoints : data.homeTeam.totalPoints;
-      const gameResult: 'W' | 'L' = myScore > oppScore ? 'W' : 'L';
-      const scoreStr = `${myScore}-${oppScore}`;
-
-      recordGameResult(currentGameIndex, gameResult, scoreStr);
-      advanceGame();
-      setResult(data);
-      setView('result');
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (view === 'live' && pbpEndRef.current) {
+      pbpEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
+  }, [livePBP, view]);
+
+  function handleStartSim() {
+    if (!currentGame || !selectedTeamId) return;
+
+    const homeId = currentGame.isHome ? selectedTeamId : currentGame.opponentId;
+    const awayId = currentGame.isHome ? currentGame.opponentId : selectedTeamId;
+
+    const homeTeamRoster = Object.values(players).filter(p => p.tid === (homeId - 1));
+    const awayTeamRoster = Object.values(players).filter(p => p.tid === (awayId - 1));
+
+    const engine = new SimulationEngine(
+      homeTeamRoster, rotations[homeId],
+      awayTeamRoster, rotations[awayId]
+    );
+
+    const result = engine.runFullGame();
+    setSimResult(result);
+    setView('live');
+    setIsSimulating(true);
+    setLivePBP([]);
+    setLiveHomeScore(0);
+    setLiveAwayScore(0);
+    setPbpIndex(0);
+
+    let currentIdx = 0;
+    const interval = setInterval(() => {
+      if (currentIdx < result.pbp.length) {
+        const event = result.pbp[currentIdx];
+        setLivePBP(prev => [...prev, event]);
+        const [h, a] = event.score.split('-').map(Number);
+        setLiveHomeScore(h);
+        setLiveAwayScore(a);
+        currentIdx++;
+        setPbpIndex(currentIdx);
+      } else {
+        clearInterval(interval);
+        setIsSimulating(false);
+
+        const myScore = currentGame.isHome ? result.homeTeam.totalPoints : result.awayTeam.totalPoints;
+        const oppScore = currentGame.isHome ? result.awayTeam.totalPoints : result.homeTeam.totalPoints;
+        const gameResult: 'W' | 'L' = myScore > oppScore ? 'W' : 'L';
+
+        const updates: any = {};
+        [...result.homeTeam.players, ...result.awayTeam.players].forEach(p => {
+          updates[p.playerId] = {
+             gamesPlayed: 1, points: p.points, rebounds: p.rebounds, assists: p.assists,
+             steals: p.steals, blocks: p.blocks, turnovers: p.turnovers, minutes: p.minutes,
+             fga: p.fga, fgm: p.fgm, fta: p.fta, ftm: p.ftm, threePa: p.threePa, threePm: p.threePm
+          };
+        });
+
+        recordGameResult(currentGameIndex, gameResult, `${myScore}-${oppScore}`, updates);
+        advanceGame();
+      }
+    }, 100);
   }
 
   const weekGames = schedule.filter((g) => g.week === selectedWeek);
-
   const gamesPlayed = schedule.filter((g) => g.result).length;
   const gamesRemaining = 82 - gamesPlayed;
 
@@ -108,10 +147,10 @@ export default function SimPage() {
             82-Game <span className="text-orange">Calendar</span>
           </h1>
           <p className="text-muted text-sm font-body mt-1">
-            {selectedTeam?.abbreviation} · {wins}–{losses} · Game {gamesPlayed + 1} of 82
+             {teams[selectedTeamId!]?.abbreviation} · {wins}–{losses} · Game {gamesPlayed + 1} of 82
           </p>
         </div>
-        {view === 'result' && (
+        {(view === 'live' || view === 'boxscore') && !isSimulating && (
           <button onClick={() => setView('schedule')} className="btn-secondary text-sm">← Schedule</button>
         )}
       </div>
@@ -124,7 +163,7 @@ export default function SimPage() {
                 <div>
                   <p className="section-title">Next Game — Game {currentGame.gameNumber}</p>
                   <p className="font-heading text-2xl font-bold uppercase mt-1">
-                    <span className="text-orange">{selectedTeam?.abbreviation}</span>
+                    <span className="text-orange">{teams[selectedTeamId!]?.abbreviation}</span>
                     <span className="text-muted mx-3">{currentGame.isHome ? 'vs' : '@'}</span>
                     {currentGame.opponentAbbr}
                   </p>
@@ -133,11 +172,10 @@ export default function SimPage() {
                   </p>
                 </div>
                 <button
-                  onClick={handleSim}
-                  disabled={loading}
-                  className="btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleStartSim}
+                  className="btn-primary text-sm"
                 >
-                  {loading ? 'Simulating...' : 'Sim Game →'}
+                  Sim Game →
                 </button>
               </div>
             </Card>
@@ -174,9 +212,7 @@ export default function SimPage() {
           <Card>
             <p className="section-title mb-3">Week {selectedWeek}</p>
             <div className="space-y-2">
-              {weekGames.length === 0 ? (
-                <p className="text-muted text-sm font-body py-4 text-center">No games this week.</p>
-              ) : weekGames.map((g) => (
+              {weekGames.map((g) => (
                 <div
                   key={g.gameNumber}
                   className={clsx(
@@ -194,11 +230,7 @@ export default function SimPage() {
                     <span className="text-muted text-xs font-body">{g.opponentName}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {g.isHome ? (
-                      <span className="text-xs text-muted font-body">Home</span>
-                    ) : (
-                      <span className="text-xs text-muted font-body">Away</span>
-                    )}
+                    <span className="text-xs text-muted font-body">{g.isHome ? 'Home' : 'Away'}</span>
                     {g.result ? (
                       <span className={clsx(
                         'font-heading font-bold text-sm px-2 py-0.5 rounded',
@@ -219,78 +251,67 @@ export default function SimPage() {
         </div>
       )}
 
-      {view === 'result' && result && (() => {
-        const prevGame = schedule[currentGameIndex - 1];
-        const myTeamResult = prevGame?.result;
-        return (
-          <div className="space-y-4">
-            <Card accent={myTeamResult === 'W' ? 'gold' : 'none'}>
-              <div className="text-center py-2">
-                <p className="section-title mb-2">Game {(prevGame?.gameNumber) ?? ''} Final</p>
-                <div className="flex items-center justify-center gap-6">
-                  <div className="text-center">
-                    <p className="font-heading text-lg font-bold uppercase text-muted">{result.homeTeam.abbreviation}</p>
-                    <p className={clsx('font-heading text-6xl font-bold', result.winner === 'home' ? 'text-gold' : 'text-text')}>
-                      {result.homeTeam.totalPoints}
-                    </p>
+      {view === 'live' && simResult && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-200px)]">
+          <div className="lg:col-span-2 space-y-4 flex flex-col h-full">
+            <Card accent="orange" className="shrink-0">
+               <div className="flex justify-between items-center text-center">
+                  <div className="w-1/3">
+                    <p className="font-heading text-xl font-bold uppercase">{simResult.homeTeam.abbreviation}</p>
+                    <p className="text-4xl font-heading font-bold">{liveHomeScore}</p>
                   </div>
-                  <div className="text-center">
-                    <p className="text-muted font-body text-xs">FINAL{result.isOT ? '/OT' : ''}</p>
+                  <div className="w-1/3">
+                     <p className="text-muted font-body text-xs uppercase tracking-widest">
+                       Q{livePBP[livePBP.length-1]?.quarter || 1} · {livePBP[livePBP.length-1]?.time || '12:00'}
+                     </p>
+                     {isSimulating && <div className="mt-2 w-full bg-border h-1 rounded-full overflow-hidden">
+                        <div className="bg-orange h-full animate-pulse" style={{ width: `${(pbpIndex / simResult.pbp.length) * 100}%` }}></div>
+                     </div>}
                   </div>
-                  <div className="text-center">
-                    <p className="font-heading text-lg font-bold uppercase text-muted">{result.awayTeam.abbreviation}</p>
-                    <p className={clsx('font-heading text-6xl font-bold', result.winner === 'away' ? 'text-gold' : 'text-text')}>
-                      {result.awayTeam.totalPoints}
-                    </p>
+                  <div className="w-1/3">
+                    <p className="font-heading text-xl font-bold uppercase">{simResult.awayTeam.abbreviation}</p>
+                    <p className="text-4xl font-heading font-bold">{liveAwayScore}</p>
                   </div>
-                </div>
-                <p className={clsx('font-heading text-xl font-bold uppercase mt-3', myTeamResult === 'W' ? 'text-gold' : 'text-red-400')}>
-                  {myTeamResult === 'W' ? '🏆 Victory' : '💀 Defeat'}
-                </p>
-                <p className="text-muted text-sm font-body mt-1">Season Record: {wins}–{losses}</p>
+               </div>
+            </Card>
+
+            <Card className="grow flex flex-col overflow-hidden">
+              <p className="section-title mb-4 shrink-0">Live Play-by-Play</p>
+              <div className="overflow-y-auto space-y-3 font-body text-sm pr-2">
+                {livePBP.slice().reverse().map((event, i) => (
+                  <div key={i} className={clsx(
+                    "flex gap-4 p-2 rounded border-l-2 transition-all",
+                    event.type === 'period' ? "bg-orange/10 border-orange" : "border-border/40 hover:bg-surface/40"
+                  )}>
+                    <span className="text-muted text-xs w-10 shrink-0">{event.time}</span>
+                    <span className="grow">{event.description}</span>
+                    <span className="text-muted text-[10px] font-heading font-bold">{event.score}</span>
+                  </div>
+                ))}
+                <div ref={pbpEndRef} />
               </div>
             </Card>
-
-            <Card>
-              <p className="section-title mb-3">Quarter Scores</p>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    {['Team', 'Q1', 'Q2', 'Q3', 'Q4', 'Total'].map((h) => (
-                      <th key={h} className={clsx('py-2 font-body font-normal text-muted', h === 'Team' ? 'text-left' : 'text-center')}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[result.homeTeam, result.awayTeam].map((team) => (
-                    <tr key={team.teamId} className="border-b border-border/40">
-                      <td className="py-2.5 font-heading font-bold">{team.abbreviation}</td>
-                      <td className="py-2.5 text-center text-muted">{team.q1}</td>
-                      <td className="py-2.5 text-center text-muted">{team.q2}</td>
-                      <td className="py-2.5 text-center text-muted">{team.q3}</td>
-                      <td className="py-2.5 text-center text-muted">{team.q4}</td>
-                      <td className={clsx('py-2.5 text-center font-heading font-bold text-lg',
-                        team.totalPoints === Math.max(result.homeTeam.totalPoints, result.awayTeam.totalPoints) ? 'text-gold' : 'text-text'
-                      )}>{team.totalPoints}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Card>
-
-            <Card>
-              <BoxScoreTable players={result.homeTeam.players} title={`${result.homeTeam.abbreviation} Box Score`} />
-            </Card>
-            <Card>
-              <BoxScoreTable players={result.awayTeam.players} title={`${result.awayTeam.abbreviation} Box Score`} />
-            </Card>
-
-            <button onClick={() => setView('schedule')} className="w-full btn-secondary py-3">
-              ← Back to Schedule
-            </button>
           </div>
-        );
-      })()}
+
+          <div className="space-y-4 overflow-y-auto">
+             <Card>
+               <BoxScoreTable players={simResult.homeTeam.players.map(p => {
+                 const current = livePBP.filter(e => e.playerId === p.playerId);
+                 return {...p, points: current.filter(e => e.type === 'shot' && e.description.includes('makes')).length * 2};
+               })} title={simResult.homeTeam.abbreviation} />
+             </Card>
+             <Card>
+               <BoxScoreTable players={simResult.awayTeam.players.map(p => {
+                 const current = livePBP.filter(e => e.playerId === p.playerId);
+                 return {...p, points: current.filter(e => e.type === 'shot' && e.description.includes('makes')).length * 2};
+               })} title={simResult.awayTeam.abbreviation} />
+             </Card>
+             {!isSimulating && (
+               <button onClick={() => setView('schedule')} className="w-full btn-primary py-4">Return to Schedule</button>
+             )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

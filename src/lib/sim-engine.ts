@@ -1,3 +1,5 @@
+import type { Player, TeamRotation } from './game-state';
+
 export interface PlayerGameLine {
   playerId: number;
   name: string;
@@ -40,196 +42,227 @@ export interface TeamBoxScore {
   q4: number;
 }
 
+export interface PBPEvent {
+  time: string; // e.g. "11:42"
+  quarter: number;
+  score: string; // e.g. "2-0"
+  description: string;
+  type: 'shot' | 'rebound' | 'turnover' | 'foul' | 'substitution' | 'timeout' | 'period';
+  playerId?: number;
+  teamId?: number;
+}
+
 export interface BoxScoreResult {
   homeTeam: TeamBoxScore;
   awayTeam: TeamBoxScore;
   winner: 'home' | 'away';
   isOT: boolean;
   gameDate: string;
+  pbp: PBPEvent[];
 }
 
-function rand(min: number, max: number): number {
-  return Math.random() * (max - min) + min;
-}
+export class SimulationEngine {
+  private homeRoster: Player[];
+  private awayRoster: Player[];
+  private homeRotation: TeamRotation;
+  private awayRotation: TeamRotation;
 
-function randInt(min: number, max: number): number {
-  return Math.floor(rand(min, max + 1));
-}
+  private homeStats: Record<number, PlayerGameLine>;
+  private awayStats: Record<number, PlayerGameLine>;
 
-function gaussianRand(): number {
-  let u = 0, v = 0;
-  while (u === 0) u = Math.random();
-  while (v === 0) v = Math.random();
-  return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-}
+  private homeScore = 0;
+  private awayScore = 0;
+  private qScores: { home: number[]; away: number[] } = { home: [0,0,0,0], away: [0,0,0,0] };
 
-function varyStats(base: number, variance: number = 0.35): number {
-  const result = base + gaussianRand() * base * variance;
-  return Math.max(0, result);
-}
+  private pbp: PBPEvent[] = [];
+  private currentTime = 720; // 12 mins in seconds
+  private currentQuarter = 1;
 
-interface RosterPlayer {
-  id: number;
-  first_name: string;
-  last_name: string;
-  position: string;
-}
+  private homeOnCourt: number[] = [];
+  private awayOnCourt: number[] = [];
 
-interface SeasonAvg {
-  player_id: number;
-  pts: number;
-  reb: number;
-  ast: number;
-  stl: number;
-  blk: number;
-  turnover: number;
-  fg_pct: number;
-  ft_pct: number;
-  fg3_pct: number;
-  min: string;
-}
+  constructor(
+    homeRoster: Player[],
+    homeRotation: TeamRotation,
+    awayRoster: Player[],
+    awayRotation: TeamRotation
+  ) {
+    this.homeRoster = homeRoster;
+    this.homeRotation = homeRotation;
+    this.awayRoster = awayRoster;
+    this.awayRotation = awayRotation;
 
-function parseMinutes(minStr: string): number {
-  if (!minStr) return 20;
-  const parts = minStr.split(':');
-  return parseInt(parts[0]) || 20;
-}
+    this.homeStats = this.initStats(homeRoster);
+    this.awayStats = this.initStats(awayRoster);
 
-function simPlayerGame(player: RosterPlayer, avg: SeasonAvg | undefined, isStarter: boolean): PlayerGameLine {
-  const basePts = avg?.pts ?? (isStarter ? rand(8, 14) : rand(3, 8));
-  const baseReb = avg?.reb ?? (isStarter ? rand(3, 6) : rand(1, 3));
-  const baseAst = avg?.ast ?? (isStarter ? rand(2, 5) : rand(0.5, 2));
-  const baseStl = avg?.stl ?? rand(0.3, 1.2);
-  const baseBlk = avg?.blk ?? rand(0.1, 0.8);
-  const baseTo = avg?.turnover ?? rand(0.8, 2.5);
-  const baseMins = avg?.min ? parseMinutes(avg.min) : (isStarter ? rand(24, 36) : rand(10, 22));
-  const fgPct = avg?.fg_pct ?? 0.45;
-  const ftPct = avg?.ft_pct ?? 0.75;
-  const fg3Pct = avg?.fg3_pct ?? 0.35;
+    this.homeOnCourt = [...homeRotation.starters];
+    this.awayOnCourt = [...awayRotation.starters];
+  }
 
-  const minutes = Math.round(varyStats(baseMins, 0.15));
-  const points = Math.round(varyStats(basePts, 0.4));
-  const rebounds = Math.round(varyStats(baseReb, 0.4));
-  const assists = Math.round(varyStats(baseAst, 0.45));
-  const steals = Math.round(varyStats(baseStl, 0.5));
-  const blocks = Math.round(varyStats(baseBlk, 0.5));
-  const turnovers = Math.round(varyStats(baseTo, 0.4));
+  private initStats(roster: Player[]): Record<number, PlayerGameLine> {
+    const stats: Record<number, PlayerGameLine> = {};
+    roster.forEach(p => {
+      stats[p.id] = {
+        playerId: p.id,
+        name: p.name,
+        position: p.pos,
+        minutes: 0, points: 0, rebounds: 0, assists: 0, steals: 0, blocks: 0, turnovers: 0,
+        fgm: 0, fga: 0, ftm: 0, fta: 0, threePm: 0, threePa: 0
+      };
+    });
+    return stats;
+  }
 
-  const threePa = randInt(1, Math.max(1, Math.round(points * 0.3)));
-  const threePm = Math.round(threePa * varyStats(fg3Pct, 0.2));
-  const ftaCalc = randInt(0, Math.round(points * 0.25));
-  const ftm = Math.round(ftaCalc * varyStats(ftPct, 0.15));
-  const remainingPts = Math.max(0, points - threePm * 3 - ftm);
-  const fgm2 = Math.round(remainingPts / 2);
-  const fgm = fgm2 + threePm;
-  const fga = Math.max(fgm, Math.round(fgm / Math.max(0.2, varyStats(fgPct, 0.1))));
+  private formatTime(seconds: number): string {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
 
-  return {
-    playerId: player.id,
-    name: `${player.first_name} ${player.last_name}`,
-    position: player.position || 'F',
-    minutes,
-    points,
-    rebounds,
-    assists,
-    steals,
-    blocks,
-    turnovers,
-    fgm,
-    fga,
-    ftm,
-    fta: ftaCalc,
-    threePm,
-    threePa,
-  };
-}
+  private addPBP(description: string, type: PBPEvent['type'], playerId?: number, teamId?: number) {
+    this.pbp.push({
+      time: this.formatTime(this.currentTime),
+      quarter: this.currentQuarter,
+      score: `${this.homeScore}-${this.awayScore}`,
+      description,
+      type,
+      playerId,
+      teamId
+    });
+  }
 
-function sumTeam(players: PlayerGameLine[], teamId: number, teamName: string, abbreviation: string): TeamBoxScore {
-  const totals = players.reduce(
-    (acc, p) => ({
-      points: acc.points + p.points,
-      rebounds: acc.rebounds + p.rebounds,
-      assists: acc.assists + p.assists,
-      steals: acc.steals + p.steals,
-      blocks: acc.blocks + p.blocks,
-      turnovers: acc.turnovers + p.turnovers,
-      fgm: acc.fgm + p.fgm,
-      fga: acc.fga + p.fga,
-      ftm: acc.ftm + p.ftm,
-      fta: acc.fta + p.fta,
-      threePm: acc.threePm + p.threePm,
-      threePa: acc.threePa + p.threePa,
-    }),
-    { points: 0, rebounds: 0, assists: 0, steals: 0, blocks: 0, turnovers: 0, fgm: 0, fga: 0, ftm: 0, fta: 0, threePm: 0, threePa: 0 }
-  );
+  public runFullGame(): BoxScoreResult {
+    for (this.currentQuarter = 1; this.currentQuarter <= 4; this.currentQuarter++) {
+      this.currentTime = 720;
+      this.addPBP(`Start of the ${this.currentQuarter}${this.getQuarterSuffix(this.currentQuarter)} Quarter`, 'period');
 
-  const totalPts = totals.points;
-  const q1 = randInt(Math.floor(totalPts * 0.22), Math.floor(totalPts * 0.28));
-  const q2 = randInt(Math.floor(totalPts * 0.22), Math.floor(totalPts * 0.28));
-  const q3 = randInt(Math.floor(totalPts * 0.22), Math.floor(totalPts * 0.28));
-  const q4 = totalPts - q1 - q2 - q3;
+      while (this.currentTime > 0) {
+        this.simulatePossession();
+        const elapsed = Math.floor(Math.random() * 14) + 10; // 10-24 seconds per possession
+        this.currentTime = Math.max(0, this.currentTime - elapsed);
 
-  return {
-    teamId,
-    teamName,
-    abbreviation,
-    players,
-    totalPoints: totalPts,
-    totalRebounds: totals.rebounds,
-    totalAssists: totals.assists,
-    totalSteals: totals.steals,
-    totalBlocks: totals.blocks,
-    totalTurnovers: totals.turnovers,
-    fgm: totals.fgm,
-    fga: totals.fga,
-    ftm: totals.ftm,
-    fta: totals.fta,
-    threePm: totals.threePm,
-    threePa: totals.threePa,
-    q1,
-    q2,
-    q3,
-    q4: Math.max(0, q4),
-  };
+        // Update minutes
+        this.homeOnCourt.forEach(id => {
+            if (this.homeStats[id]) this.homeStats[id].minutes += elapsed / 60;
+        });
+        this.awayOnCourt.forEach(id => {
+            if (this.awayStats[id]) this.awayStats[id].minutes += elapsed / 60;
+        });
+
+        this.handleSubs();
+      }
+
+      this.qScores.home[this.currentQuarter-1] = this.homeScore - this.qScores.home.reduce((a,b)=>a+b, 0);
+      this.qScores.away[this.currentQuarter-1] = this.awayScore - this.qScores.away.reduce((a,b)=>a+b, 0);
+    }
+
+    let isOT = false;
+    if (this.homeScore === this.awayScore) {
+        isOT = true;
+        const homeOT = Math.floor(Math.random() * 15);
+        const awayOT = Math.floor(Math.random() * 15) + (homeOT === Math.floor(Math.random() * 15) ? 1 : 0);
+        this.homeScore += homeOT;
+        this.awayScore += awayOT;
+        this.addPBP("Game went to OT!", "period");
+    }
+
+    return {
+      homeTeam: this.finalizeTeamBox(this.homeRoster[0].tid + 1, "Home Team", "HOME", this.homeStats, this.homeScore, this.qScores.home),
+      awayTeam: this.finalizeTeamBox(this.awayRoster[0].tid + 1, "Away Team", "AWAY", this.awayStats, this.awayScore, this.qScores.away),
+      winner: this.homeScore > this.awayScore ? 'home' : 'away',
+      isOT,
+      gameDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      pbp: this.pbp
+    };
+  }
+
+  private getQuarterSuffix(q: number): string {
+    if (q === 1) return 'st';
+    if (q === 2) return 'nd';
+    if (q === 3) return 'rd';
+    return 'th';
+  }
+
+  private handleSubs() {
+      // Basic substitution logic can be added here
+  }
+
+  private simulatePossession() {
+    const isHomePossession = Math.random() > 0.5;
+    const offenseTeamId = isHomePossession ? 1 : 2;
+    const offenseOnCourt = isHomePossession ? this.homeOnCourt : this.awayOnCourt;
+    const defenseOnCourt = isHomePossession ? this.awayOnCourt : this.homeOnCourt;
+    const offenseStats = isHomePossession ? this.homeStats : this.awayStats;
+    const defenseStats = isHomePossession ? this.awayStats : this.homeStats;
+    const offenseRoster = isHomePossession ? this.homeRoster : this.awayRoster;
+
+    const shooterId = offenseOnCourt[Math.floor(Math.random() * offenseOnCourt.length)];
+    const shooter = offenseRoster.find(p => p.id === shooterId);
+    if (!shooter) return;
+
+    const isThree = Math.random() < (shooter.ratings.tp / 100);
+    offenseStats[shooterId][isThree ? 'threePa' : 'fga']++;
+    offenseStats[shooterId].fga++;
+
+    const shotRoll = Math.random() * 100;
+    const shotThreshold = isThree ? (shooter.ratings.tp * 0.4) : (shooter.ratings.fg * 0.45 + 10);
+
+    if (shotRoll < shotThreshold) {
+      const pts = isThree ? 3 : 2;
+      offenseStats[shooterId].points += pts;
+      offenseStats[shooterId].fgm++;
+      if (isThree) offenseStats[shooterId].threePm++;
+
+      if (isHomePossession) this.homeScore += pts;
+      else this.awayScore += pts;
+
+      this.addPBP(`${shooter.name} makes a ${isThree ? '3-pointer' : 'jumper'}`, 'shot', shooterId, offenseTeamId);
+    } else {
+      this.addPBP(`${shooter.name} misses a ${isThree ? '3-pointer' : 'jumper'}`, 'shot', shooterId, offenseTeamId);
+
+      const rebounderId = [...offenseOnCourt, ...defenseOnCourt][Math.floor(Math.random() * 10)];
+      const isDefensive = defenseOnCourt.includes(rebounderId);
+      const rebounderStats = isDefensive ? defenseStats : offenseStats;
+      if (rebounderStats[rebounderId]) rebounderStats[rebounderId].rebounds++;
+
+      const rebounderName = [...this.homeRoster, ...this.awayRoster].find(p => p.id === rebounderId)?.name;
+      this.addPBP(`${rebounderName} grabs the ${isDefensive ? 'defensive' : 'offensive'} rebound`, 'rebound', rebounderId);
+    }
+  }
+
+  private finalizeTeamBox(id: number, name: string, abbr: string, stats: Record<number, PlayerGameLine>, totalPoints: number, quarters: number[]): TeamBoxScore {
+    const players = Object.values(stats);
+    return {
+      teamId: id,
+      teamName: name,
+      abbreviation: abbr,
+      players,
+      totalPoints,
+      totalRebounds: players.reduce((a, b) => a + b.rebounds, 0),
+      totalAssists: players.reduce((a, b) => a + b.assists, 0),
+      totalSteals: players.reduce((a, b) => a + b.steals, 0),
+      totalBlocks: players.reduce((a, b) => a + b.blocks, 0),
+      totalTurnovers: players.reduce((a, b) => a + b.turnovers, 0),
+      fgm: players.reduce((a, b) => a + b.fgm, 0),
+      fga: players.reduce((a, b) => a + b.fga, 0),
+      ftm: players.reduce((a, b) => a + b.ftm, 0),
+      fta: players.reduce((a, b) => a + b.fta, 0),
+      threePm: players.reduce((a, b) => a + b.threePm, 0),
+      threePa: players.reduce((a, b) => a + b.threePa, 0),
+      q1: quarters[0],
+      q2: quarters[1],
+      q3: quarters[2],
+      q4: quarters[3],
+    };
+  }
 }
 
 export function simGame(
-  homePlayers: RosterPlayer[],
-  homeAverages: SeasonAvg[],
-  homeTeamId: number,
-  homeTeamName: string,
-  homeAbbr: string,
-  awayPlayers: RosterPlayer[],
-  awayAverages: SeasonAvg[],
-  awayTeamId: number,
-  awayTeamName: string,
-  awayAbbr: string
+  homeRoster: Player[],
+  homeRotation: TeamRotation,
+  awayRoster: Player[],
+  awayRotation: TeamRotation
 ): BoxScoreResult {
-  const getAvg = (avgs: SeasonAvg[], id: number) => avgs.find((a) => a.player_id === id);
-
-  const homeSorted = [...homePlayers].slice(0, 10);
-  const awaySorted = [...awayPlayers].slice(0, 10);
-
-  const homeLines = homeSorted.map((p, i) => simPlayerGame(p, getAvg(homeAverages, p.id), i < 5));
-  const awayLines = awaySorted.map((p, i) => simPlayerGame(p, getAvg(awayAverages, p.id), i < 5));
-
-  const homeBox = sumTeam(homeLines, homeTeamId, homeTeamName, homeAbbr);
-  const awayBox = sumTeam(awayLines, awayTeamId, awayTeamName, awayAbbr);
-
-  let isOT = false;
-  if (homeBox.totalPoints === awayBox.totalPoints) {
-    const otHome = randInt(2, 12);
-    const otAway = randInt(2, 12);
-    homeBox.totalPoints += otHome;
-    awayBox.totalPoints += otAway;
-    isOT = true;
-  }
-
-  return {
-    homeTeam: homeBox,
-    awayTeam: awayBox,
-    winner: homeBox.totalPoints > awayBox.totalPoints ? 'home' : 'away',
-    isOT,
-    gameDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-  };
+  const engine = new SimulationEngine(homeRoster, homeRotation, awayRoster, awayRotation);
+  return engine.runFullGame();
 }
