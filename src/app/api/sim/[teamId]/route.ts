@@ -3,6 +3,7 @@ import { NBA_TEAMS } from '@/lib/nba-teams';
 import { simGame } from '@/lib/sim-engine';
 import { parseBBGM, BBGM_TID_TO_ABB, BBGMRatings } from '@/lib/bbgm-parser';
 import { NextResponse } from 'next/server';
+import type { Player, TeamRotation } from '@/lib/game-state';
 
 const BBGM_ERA_FILE: Record<string, string> = {
   'classic-1985':  'NBA.Legacy.1985.v3.0.beta.json',
@@ -16,37 +17,21 @@ const BBGM_ERA_FILE: Record<string, string> = {
   'current-2025':  '2025-26.NBA.Roster 3.json',
 };
 
-/** Convert BBGM ratings (0-100) into realistic NBA season-average equivalents */
-function ratingsToAvg(id: number, r: BBGMRatings, ovr: number) {
-  const pts  = ((r.ins ?? 50) * 0.10 + (r.fg ?? 50) * 0.08 + (r.tp ?? 50) * 0.06) * 0.55 + 2;
-  const reb  = ((r.reb ?? 50) * 0.12 + (r.hgt ?? 50) * 0.05) * 0.35 + 1;
-  const ast  = ((r.pss ?? 50) * 0.10 + (r.drb ?? 50) * 0.03) * 0.25 + 0.5;
-  const stl  = (r.stl ?? 50) * 0.025;
-  const blk  = (r.blk ?? 50) * 0.020;
-  const fgPct  = 0.38 + (r.fg  ?? 50) / 100 * 0.20;
-  const ftPct  = 0.55 + (r.ft  ?? 50) / 100 * 0.30;
-  const fg3Pct = 0.25 + (r.tp  ?? 50) / 100 * 0.20;
-  const mins   = 12 + (ovr / 100) * 24;
+function buildRotation(players: Player[]): TeamRotation {
+  const sorted = [...players].sort((a, b) => b.ovr - a.ovr);
   return {
-    player_id:   id,
-    season:      2024,
-    games_played: 60,
-    pts:    Math.min(35, Math.max(2,   pts)),
-    reb:    Math.min(15, Math.max(1,   reb)),
-    ast:    Math.min(12, Math.max(0.5, ast)),
-    stl:    Math.min(3,  Math.max(0.1, stl)),
-    blk:    Math.min(3,  Math.max(0.1, blk)),
-    turnover: 1.5 + (ovr / 100) * 1.5,
-    fg_pct:  Math.min(0.65, Math.max(0.30, fgPct)),
-    fg3_pct: Math.min(0.45, Math.max(0.20, fg3Pct)),
-    ft_pct:  Math.min(0.95, Math.max(0.45, ftPct)),
-    min:     String(Math.round(mins)),
+    starters: sorted.slice(0, 5).map((p) => p.id),
+    bench: sorted.slice(5, 12).map((p) => p.id),
+    minutes: sorted.reduce((acc, p, idx) => {
+      acc[p.id] = idx < 5 ? 32 : idx < 10 ? 15 : 0;
+      return acc;
+    }, {} as Record<number, number>),
   };
 }
 
-async function getBBGMRoster(era: string, teamAbb: string) {
+async function getBBGMPlayers(era: string, teamAbb: string, teamTid: number): Promise<Player[]> {
   const fileName = BBGM_ERA_FILE[era];
-  if (!fileName) return null;
+  if (!fileName) return [];
 
   const baseUrl = process.env.VERCEL_URL
     ? `https://${process.env.VERCEL_URL}`
@@ -64,25 +49,60 @@ async function getBBGMRoster(era: string, teamAbb: string) {
   return roster.players
     .filter((p) => p.tid === tid)
     .sort((a, b) => b.ovr - a.ovr)
-    .slice(0, 10)
-    .map((p, i) => ({
-      player: {
-        id: i + 1,
-        first_name: p.name.split(' ')[0],
-        last_name:  p.name.split(' ').slice(1).join(' ') || p.name,
-        position:   p.pos || 'F',
-        height: '',
-        weight: '',
-        jersey_number: '',
-        college: p.college || '',
-        country: '',
-        draft_year: null,
-        draft_round: null,
-        draft_number: null,
-        team: null,
+    .slice(0, 15)
+    .map((p, i): Player => ({
+      id: teamTid * 100 + i,
+      name: p.name,
+      pos: p.pos || 'F',
+      tid: teamTid,
+      ovr: p.ovr,
+      pot: p.ovr,
+      hgt: 76,
+      weight: 220,
+      ratings: p.ratings[0] ?? ({} as BBGMRatings),
+      stats: {
+        gamesPlayed: 0, points: 0, rebounds: 0, assists: 0,
+        steals: 0, blocks: 0, turnovers: 0, minutes: 0,
+        fga: 0, fgm: 0, fta: 0, ftm: 0, threePa: 0, threePm: 0,
       },
-      avg: ratingsToAvg(i + 1, p.ratings[0] ?? ({} as BBGMRatings), p.ovr),
+      contract: { amount: 5000000, exp: 2026 },
+      stamina: 100,
+      injury: { gamesRemaining: 0, type: null },
     }));
+}
+
+function rosterDataToPlayers(teamId: number): Player[] {
+  const roster = ROSTER_DATA[teamId] ?? [];
+  return roster.map((p, i): Player => ({
+    id: p.id,
+    name: `${p.first_name} ${p.last_name}`,
+    pos: p.position,
+    tid: teamId,
+    ovr: Math.round((p.pts * 1.5 + p.reb * 1.2 + p.ast * 1.0) * 2),
+    pot: 70,
+    hgt: 76,
+    weight: 220,
+    ratings: {
+      fg: Math.round(p.fg_pct * 100),
+      tp: Math.round(p.fg3_pct * 100),
+      ft: Math.round(p.ft_pct * 100),
+      reb: Math.round(p.reb * 6),
+      pss: Math.round(p.ast * 8),
+      stl: Math.round(p.stl * 20),
+      blk: Math.round(p.blk * 20),
+      ins: 50,
+      drb: 50,
+      hgt: 50,
+    } as BBGMRatings,
+    stats: {
+      gamesPlayed: 0, points: 0, rebounds: 0, assists: 0,
+      steals: 0, blocks: 0, turnovers: 0, minutes: 0,
+      fga: 0, fgm: 0, fta: 0, ftm: 0, threePa: 0, threePm: 0,
+    },
+    contract: { amount: 5000000, exp: 2026 },
+    stamina: 100,
+    injury: { gamesRemaining: 0, type: null },
+  }));
 }
 
 export async function GET(
@@ -105,40 +125,26 @@ export async function GET(
       return NextResponse.json({ error: 'Team not found' }, { status: 404 });
     }
 
-    const isBBGM = !!BBGM_ERA_FILE[era];
+    let homePlayers: Player[];
+    let awayPlayers: Player[];
 
-    let homePlayers: { id: number; first_name: string; last_name: string; position: string }[];
-    let homeAvgs:    ReturnType<typeof ratingsToAvg>[];
-    let awayPlayers: typeof homePlayers;
-    let awayAvgs:    typeof homeAvgs;
-
-    if (isBBGM) {
-      const [homeRoster, awayRoster] = await Promise.all([
-        getBBGMRoster(era, homeTeamInfo.abbreviation),
-        getBBGMRoster(era, awayTeamInfo.abbreviation),
+    if (BBGM_ERA_FILE[era]) {
+      [homePlayers, awayPlayers] = await Promise.all([
+        getBBGMPlayers(era, homeTeamInfo.abbreviation, homeId),
+        getBBGMPlayers(era, awayTeamInfo.abbreviation, awayId),
       ]);
-      if (!homeRoster || !awayRoster) {
+      if (!homePlayers.length || !awayPlayers.length) {
         return NextResponse.json({ error: 'Could not load BBGM roster' }, { status: 500 });
       }
-      homePlayers = homeRoster.map((x) => x.player);
-      homeAvgs    = homeRoster.map((x) => x.avg);
-      awayPlayers = awayRoster.map((x) => x.player);
-      awayAvgs    = awayRoster.map((x) => x.avg);
     } else {
-      const hd = ROSTER_DATA[homeId] ?? [];
-      const ad = ROSTER_DATA[awayId] ?? [];
-      const toPlayer = (p: typeof hd[0]) => ({ id: p.id, first_name: p.first_name, last_name: p.last_name, position: p.position, height: '', weight: '', jersey_number: p.jersey_number, college: '', country: '', draft_year: null, draft_round: null, draft_number: null, team: null });
-      const toAvg    = (p: typeof hd[0]) => ({ player_id: p.id, season: 2024, games_played: 60, pts: p.pts, reb: p.reb, ast: p.ast, stl: p.stl, blk: p.blk, turnover: 2.0, fg_pct: p.fg_pct, fg3_pct: p.fg3_pct, ft_pct: p.ft_pct, min: p.min });
-      homePlayers = hd.map(toPlayer);
-      homeAvgs    = hd.map(toAvg);
-      awayPlayers = ad.map(toPlayer);
-      awayAvgs    = ad.map(toAvg);
+      homePlayers = rosterDataToPlayers(homeId);
+      awayPlayers = rosterDataToPlayers(awayId);
     }
 
-    const result = simGame(
-      homePlayers, homeAvgs, homeId, homeTeamInfo.full_name, homeTeamInfo.abbreviation,
-      awayPlayers, awayAvgs, awayId, awayTeamInfo.full_name, awayTeamInfo.abbreviation,
-    );
+    const homeRotation = buildRotation(homePlayers);
+    const awayRotation = buildRotation(awayPlayers);
+
+    const result = simGame(homePlayers, homeRotation, awayPlayers, awayRotation);
 
     return NextResponse.json(result);
   } catch (e) {

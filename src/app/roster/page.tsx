@@ -67,7 +67,8 @@ type EnrichedPlayer = BBGMPlayer & { teamAbb: string };
 
 export default function RosterPage() {
   const router = useRouter();
-  const { selectedTeam, isSetupComplete, selectedSeason, selectedEra } = useGameState();
+  const { selectedTeamId, teams, isSetupComplete, selectedSeason, selectedEra } = useGameState();
+  const selectedTeam = selectedTeamId != null ? teams[selectedTeamId] : null;
 
   const [players,     setPlayers]     = useState<Player[]>([]);
   const [averages,    setAverages]    = useState<SeasonAvg[]>([]);

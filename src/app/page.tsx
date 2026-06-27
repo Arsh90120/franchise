@@ -7,7 +7,8 @@ import Card from '@/components/ui/Card';
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { selectedTeam, isSetupComplete, selectedSeason, wins, losses, week, gmName } = useGameState();
+  const { selectedTeamId, teams, isSetupComplete, selectedSeason, wins, losses, week, gmName } = useGameState();
+  const selectedTeam = selectedTeamId != null ? teams[selectedTeamId] : null;
 
   useEffect(() => {
     if (!isSetupComplete) {

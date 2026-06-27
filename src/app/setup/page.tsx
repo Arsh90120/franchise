@@ -5,16 +5,30 @@ import { useRouter } from 'next/navigation';
 import { useGameState } from '@/lib/game-state';
 import { NBA_TEAMS, ERAS } from '@/lib/nba-teams';
 import { generateSchedule } from '@/lib/schedule';
+import { parseBBGM } from '@/lib/bbgm-parser';
 import { clsx } from 'clsx';
+
+const BBGM_ERA_FILE: Record<string, string> = {
+  'classic-1985':  '/data/NBA.Legacy.1985.v3.0.beta.json',
+  'jordan-1996':   '/data/1995-96.NBA.Roster.json',
+  'dynasty-2015':  '/data/2015-16.NBA.Roster.json',
+  'dynasty-2016':  '/data/2016-17.NBA.Roster.json',
+  'dynasty-2018':  '/data/2018-19.NBA.Roster.json',
+  'bubble-2020':   '/data/2020-21.NBA.Roster.json',
+  'modern-2022':   '/data/2022-23.NBA.Roster.json',
+  'modern-2024':   '/data/2024-25.NBA.Roster.json',
+  'current-2025':  '/data/2025-26.NBA.Roster 3.json',
+};
 
 export default function SetupPage() {
   const router = useRouter();
-  const { isSetupComplete, setTeam, setEra, setGmName, completeSetup } = useGameState();
+  const { isSetupComplete, setTeam, setEra, setGmName, initLeague } = useGameState();
 
   const [teamId, setTeamId] = useState<number>(14);
-  const [eraId, setEraId] = useState<string>('modern');
+  const [eraId, setEraId] = useState<string>('modern-2024');
   const [gmNameInput, setGmNameInput] = useState('');
   const [conference, setConference] = useState<'All' | 'East' | 'West'>('All');
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (isSetupComplete) router.push('/');
@@ -24,16 +38,57 @@ export default function SetupPage() {
     ? NBA_TEAMS
     : NBA_TEAMS.filter((t) => t.conference === conference);
 
-  function handleStart() {
+  async function handleStart() {
     const team = NBA_TEAMS.find((t) => t.id === teamId);
     const era = ERAS.find((e) => e.id === eraId);
     if (!team || !era) return;
-    setTeam(team);
-    setEra(era.id, era.season);
-    setGmName(gmNameInput.trim() || 'GM');
-    const schedule = generateSchedule(team.id);
-    completeSetup(schedule);
-    router.push('/');
+
+    setLoading(true);
+    try {
+      const bbgmFile = BBGM_ERA_FILE[eraId];
+      if (!bbgmFile) throw new Error('Era file not found');
+
+      const res = await fetch(bbgmFile);
+      const json = await res.json();
+      const roster = parseBBGM(json);
+
+      const players = roster.players.map((p, idx) => ({
+        id: idx + 1,
+        name: p.name,
+        pos: p.pos,
+        tid: p.tid,
+        ovr: p.ovr,
+        pot: p.ratings[0].pot,
+        hgt: p.hgt,
+        weight: p.weight,
+        ratings: p.ratings[0],
+        stats: {
+          gamesPlayed: 0, points: 0, rebounds: 0, assists: 0, steals: 0,
+          blocks: 0, turnovers: 0, minutes: 0, fga: 0, fgm: 0, fta: 0,
+          ftm: 0, threePa: 0, threePm: 0
+        },
+        contract: {
+          amount: typeof p.contract.amount === 'string' ? parseFloat(p.contract.amount) : p.contract.amount,
+          exp: typeof p.contract.exp === 'string' ? parseInt(p.contract.exp) : p.contract.exp,
+        },
+        stamina: 100,
+        injury: { gamesRemaining: 0, type: null }
+      }));
+
+      setTeam(team.id);
+      setEra(era.id, era.season);
+      setGmName(gmNameInput.trim() || 'GM');
+
+      const schedule = generateSchedule(team.id);
+      initLeague(players, NBA_TEAMS, schedule);
+
+      router.push('/');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to initialize league. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   const selectedTeam = NBA_TEAMS.find((t) => t.id === teamId);
@@ -110,7 +165,7 @@ export default function SetupPage() {
             onChange={(e) => setEraId(e.target.value)}
             className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm font-body text-text focus:outline-none focus:border-orange/60 appearance-none cursor-pointer"
           >
-            {ERAS.map((era) => (
+            {ERAS.filter(e => BBGM_ERA_FILE[e.id]).map((era) => (
               <option key={era.id} value={era.id}>{era.label}</option>
             ))}
           </select>
@@ -119,8 +174,12 @@ export default function SetupPage() {
           )}
         </div>
 
-        <button onClick={handleStart} className="w-full btn-primary py-4 text-base rounded-xl">
-          Start Franchise →
+        <button
+          onClick={handleStart}
+          disabled={loading}
+          className="w-full btn-primary py-4 text-base rounded-xl disabled:opacity-50"
+        >
+          {loading ? 'Initializing League...' : 'Start Franchise →'}
         </button>
       </div>
     </div>

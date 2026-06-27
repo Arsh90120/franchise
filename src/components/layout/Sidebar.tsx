@@ -18,7 +18,8 @@ const nav = [
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { selectedTeam, wins, losses, resetGame } = useGameState();
+  const { selectedTeamId, teams, wins, losses, resetGame } = useGameState();
+  const selectedTeam = selectedTeamId != null ? teams[selectedTeamId] : null;
 
   return (
     <aside className="w-56 bg-surface border-r border-border flex flex-col h-full shrink-0">
