@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useGameState } from '@/lib/game-state';
 import { NBA_TEAMS, ERAS } from '@/lib/nba-teams';
 import { generateSchedule } from '@/lib/schedule';
+import { BBGMPlayer } from '@/lib/bbgm-parser';
 import { clsx } from 'clsx';
 
 export default function SetupPage() {
@@ -12,7 +13,7 @@ export default function SetupPage() {
   const { isSetupComplete, setTeam, setEra, setGmName, completeSetup } = useGameState();
 
   const [teamId, setTeamId] = useState<number>(14);
-  const [eraId, setEraId] = useState<string>('modern');
+  const [eraId, setEraId] = useState<string>('modern-2024');
   const [gmNameInput, setGmNameInput] = useState('');
   const [conference, setConference] = useState<'All' | 'East' | 'West'>('All');
 
@@ -24,16 +25,67 @@ export default function SetupPage() {
     ? NBA_TEAMS
     : NBA_TEAMS.filter((t) => t.conference === conference);
 
-  function handleStart() {
+  const [isInitializing, setIsInitializing] = useState(false);
+
+  async function handleStart() {
     const team = NBA_TEAMS.find((t) => t.id === teamId);
     const era = ERAS.find((e) => e.id === eraId);
     if (!team || !era) return;
-    setTeam(team);
-    setEra(era.id, era.season);
-    setGmName(gmNameInput.trim() || 'GM');
-    const schedule = generateSchedule(team.id);
-    completeSetup(schedule);
-    router.push('/');
+
+    setIsInitializing(true);
+    try {
+      setTeam(team);
+      setEra(era.id, era.season);
+      setGmName(gmNameInput.trim() || 'GM');
+
+      let leaguePlayers: BBGMPlayer[] = [];
+      if (era.bbgm) {
+        const response = await fetch(`/api/roster/bbgm/${era.id}`);
+        const data = await response.json();
+        leaguePlayers = data.players || [];
+      } else {
+        // Fallback for legacy eras: Map all teams' ROSTER_DATA to BBGMPlayer format
+        const teamsToFetch = NBA_TEAMS;
+        const allRosters = await Promise.all(
+          teamsToFetch.map(async (t) => {
+            const res = await fetch(`/api/roster/${t.id}?season=${era.season}`);
+            return res.json();
+          })
+        );
+
+        leaguePlayers = allRosters.flatMap((data, index) => {
+          const tid = index; // Simple mapping for legacy
+          return (data.players || []).map((p: any, pIdx: number) => ({
+            id: tid * 100 + pIdx,
+            name: `${p.first_name} ${p.last_name}`,
+            pos: p.position || 'F',
+            tid: tid,
+            hgt: 78, // Default
+            weight: 210, // Default
+            born: { year: 1995, loc: '' },
+            contract: { amount: 5000, exp: era.season + 2 },
+            college: '',
+            imgURL: '',
+            ratings: [{
+              hgt: 50, stre: 50, spd: 50, jmp: 50, endu: 50,
+              ins: 50, dnk: 50, ft: 70, fg: 50, tp: 50,
+              blk: 50, stl: 50, drb: 50, pss: 50, reb: 50, pot: 60
+            }],
+            skills: [],
+            ovr: Math.round(p.pts ? (p.pts * 2 + p.reb + p.ast) : 65), // Mock OVR for legacy
+          }));
+        });
+      }
+
+      const schedule = generateSchedule(team.id);
+      completeSetup(schedule, leaguePlayers);
+      router.push('/');
+    } catch (error) {
+      console.error('Failed to initialize league:', error);
+      alert('Failed to initialize league. Please try again.');
+    } finally {
+      setIsInitializing(false);
+    }
   }
 
   const selectedTeam = NBA_TEAMS.find((t) => t.id === teamId);
@@ -119,8 +171,12 @@ export default function SetupPage() {
           )}
         </div>
 
-        <button onClick={handleStart} className="w-full btn-primary py-4 text-base rounded-xl">
-          Start Franchise →
+        <button
+          onClick={handleStart}
+          disabled={isInitializing}
+          className="w-full btn-primary py-4 text-base rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isInitializing ? 'Initializing League...' : 'Start Franchise →'}
         </button>
       </div>
     </div>

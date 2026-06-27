@@ -6,29 +6,8 @@ import { useRouter } from 'next/navigation';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import { ERAS } from '@/lib/nba-teams';
-import { parseBBGM, BBGM_TID_TO_ABB } from '@/lib/bbgm-parser';
-import type { BBGMPlayer } from '@/lib/bbgm-parser';
+import { BBGM_TID_TO_ABB } from '@/lib/bbgm-parser';
 
-interface Player {
-  id: number;
-  first_name: string;
-  last_name: string;
-  position: string;
-  jersey_number: string;
-  height: string;
-  weight: string;
-}
-interface SeasonAvg {
-  player_id: number;
-  pts: number;
-  reb: number;
-  ast: number;
-  fg_pct: number;
-  min: string;
-}
-
-const POSITION_ORDER = ['G','PG','SG','G-F','GF','SF','PF','F','F-C','FC','C'];
-function posSort(pos: string) { const i = POSITION_ORDER.indexOf(pos); return i === -1 ? 99 : i; }
 function positionColor(pos: string): 'orange' | 'gold' | 'green' | 'muted' {
   if (pos.startsWith('G') || pos === 'PG' || pos === 'SG') return 'orange';
   if (pos.startsWith('F') || pos === 'SF' || pos === 'PF') return 'gold';
@@ -48,86 +27,28 @@ function fmtContract(amount: string | number) {
   return `$${(n / 1000).toFixed(1)}M`;
 }
 
-// NOTE: filename must match exactly what is in public/data/
-const BBGM_ERA_FILE: Record<string, string> = {
-  'classic-1985':  '/data/NBA.Legacy.1985.v3.0.beta.json',
-  'jordan-1996':   '/data/1995-96.NBA.Roster.json',
-  'dynasty-2015':  '/data/2015-16.NBA.Roster.json',
-  'dynasty-2016':  '/data/2016-17.NBA.Roster.json',
-  'dynasty-2018':  '/data/2018-19.NBA.Roster.json',
-  'bubble-2020':   '/data/2020-21.NBA.Roster.json',
-  'modern-2022':   '/data/2022-23.NBA.Roster.json',
-  'modern-2024':   '/data/2024-25.NBA.Roster.json',
-  'current-2025':  '/data/2025-26.NBA.Roster 3.json',
-};
-
-const BBGM_ERA_SLUGS = new Set(Object.keys(BBGM_ERA_FILE));
-
-type EnrichedPlayer = BBGMPlayer & { teamAbb: string };
-
 export default function RosterPage() {
   const router = useRouter();
-  const { selectedTeam, isSetupComplete, selectedSeason, selectedEra } = useGameState();
+  const { selectedTeam, isSetupComplete, selectedSeason, selectedEra, leaguePlayers } = useGameState();
 
-  const [players,     setPlayers]     = useState<Player[]>([]);
-  const [averages,    setAverages]    = useState<SeasonAvg[]>([]);
-  const [bbgmPlayers, setBbgmPlayers] = useState<EnrichedPlayer[]>([]);
-  const [loading,     setLoading]     = useState(true);
-  const [error,       setError]       = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const eraLabel = ERAS.find((e) => e.id === selectedEra)?.label ?? 'Modern';
-  const isBBGM   = BBGM_ERA_SLUGS.has(selectedEra);
 
   useEffect(() => {
-    if (!isBBGM) return;
-    if (!isSetupComplete) { router.push('/setup'); return; }
-    if (!selectedTeam) return;
-    setLoading(true); setError(null); setBbgmPlayers([]);
+    if (!isSetupComplete) {
+      router.push('/setup');
+      return;
+    }
+    setLoading(false);
+  }, [isSetupComplete, router]);
 
-    const url = BBGM_ERA_FILE[selectedEra];
-    fetch(url)
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`); return r.json(); })
-      .then((json) => {
-        const roster = parseBBGM(json);
-        const tidEntry = Object.entries(BBGM_TID_TO_ABB).find(([, abb]) => abb === selectedTeam.abbreviation);
-        if (!tidEntry) {
-          setError(`No BBGM mapping for ${selectedTeam.abbreviation}`);
-          setLoading(false);
-          return;
-        }
-        const tid = parseInt(tidEntry[0]);
-        const filtered = roster.players
-          .filter((p) => p.tid === tid)
-          .map((p) => ({ ...p, teamAbb: selectedTeam.abbreviation }))
-          .sort((a, b) => b.ovr - a.ovr);
-        setBbgmPlayers(filtered);
-        setLoading(false);
-      })
-      .catch((e) => {
-        console.error('BBGM fetch error:', e);
-        setError(`Could not load ${url}`);
-        setLoading(false);
-      });
-  }, [selectedTeam, isSetupComplete, router, selectedEra, isBBGM]);
-
-  useEffect(() => {
-    if (isBBGM) return;
-    if (!isSetupComplete) { router.push('/setup'); return; }
-    if (!selectedTeam) return;
-    setLoading(true); setError(null);
-    fetch(`/api/roster/${selectedTeam.id}?season=${selectedSeason}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.error) { setError(d.error); setLoading(false); return; }
-        const sorted = (d.players as Player[]).sort((a, b) => posSort(a.position) - posSort(b.position));
-        setPlayers(sorted);
-        setAverages(d.averages || []);
-        setLoading(false);
-      })
-      .catch(() => { setError('Failed to load roster.'); setLoading(false); });
-  }, [selectedTeam, isSetupComplete, router, selectedSeason, isBBGM]);
-
-  function getAvg(id: number) { return averages.find((a) => a.player_id === id); }
+  const teamPlayers = leaguePlayers
+    .filter((p) => {
+      const tidEntry = Object.entries(BBGM_TID_TO_ABB).find(([, abb]) => abb === selectedTeam?.abbreviation);
+      return tidEntry ? p.tid === parseInt(tidEntry[0]) : false;
+    })
+    .sort((a, b) => b.ovr - a.ovr);
 
   const header = (
     <div>
@@ -136,7 +57,7 @@ export default function RosterPage() {
         {selectedTeam?.city} <span className="text-orange">{selectedTeam?.name}</span>
       </h1>
       <p className="text-muted text-sm font-body mt-1">
-        {eraLabel} · {selectedSeason}–{selectedSeason + 1} · {isBBGM ? bbgmPlayers.length : players.length} Players
+        {eraLabel} · {selectedSeason}–{selectedSeason + 1} · {teamPlayers.length} Players
       </p>
     </div>
   );
@@ -147,90 +68,42 @@ export default function RosterPage() {
     </div>
   );
 
-  if (error) return (
-    <div className="space-y-6">{header}
-      <Card><p className="text-red-400 text-sm font-body py-8 text-center">{error}</p></Card>
-    </div>
-  );
-
-  if (isBBGM) {
-    return (
-      <div className="space-y-6">
-        {header}
-        <Card>
-          {bbgmPlayers.length === 0 ? (
-            <p className="text-muted text-sm font-body py-8 text-center">No players found for {selectedTeam?.abbreviation} in this era.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    {['Player','Pos','OVR','HT','WT','SPD','STR','JMP','FG','3PT','FT','BLK','STL','REB','Contract'].map((h) => (
-                      <th key={h} className="text-left text-muted font-body font-normal py-2 pr-3 last:pr-0 whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {bbgmPlayers.map((p, i) => {
-                    const rt = p.ratings[0];
-                    return (
-                      <tr key={i} className="border-b border-border/50 hover:bg-surface/50 transition-colors">
-                        <td className="py-3 pr-3 font-heading font-bold text-text whitespace-nowrap">{p.name}</td>
-                        <td className="py-3 pr-3"><Badge label={p.pos || '—'} variant={positionColor(p.pos || '')} /></td>
-                        <td className={`py-3 pr-3 font-heading font-bold text-base ${ovrColor(p.ovr)}`}>{p.ovr}</td>
-                        <td className="py-3 pr-3 text-muted font-body">{fmtHeight(p.hgt)}</td>
-                        <td className="py-3 pr-3 text-muted font-body">{p.weight}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.spd ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.stre ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.jmp ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.fg ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.tp ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.ft ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.blk ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.stl ?? '—'}</td>
-                        <td className="py-3 pr-3 font-heading">{rt?.reb ?? '—'}</td>
-                        <td className="py-3 text-muted font-body whitespace-nowrap">{fmtContract(p.contract.amount)} / {p.contract.exp}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       {header}
       <Card>
-        {players.length === 0 ? (
-          <p className="text-muted text-sm font-body py-8 text-center">No players found.</p>
+        {teamPlayers.length === 0 ? (
+          <p className="text-muted text-sm font-body py-8 text-center">No players found for {selectedTeam?.abbreviation} in this era.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
-                  {['#','Player','Pos','PPG','RPG','APG','FG%','MIN'].map((h) => (
-                    <th key={h} className="text-left text-muted font-body font-normal py-2 pr-4 last:pr-0">{h}</th>
+                  {['Player','Pos','OVR','HT','WT','SPD','STR','JMP','FG','3PT','FT','BLK','STL','REB','Contract'].map((h) => (
+                    <th key={h} className="text-left text-muted font-body font-normal py-2 pr-3 last:pr-0 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {players.map((p) => {
-                  const avg = getAvg(p.id);
+                {teamPlayers.map((p, i) => {
+                  const rt = p.ratings[0];
                   return (
-                    <tr key={p.id} className="border-b border-border/50 hover:bg-surface/50 transition-colors">
-                      <td className="py-3 pr-4 text-muted font-body">{p.jersey_number || '—'}</td>
-                      <td className="py-3 pr-4 font-heading font-bold text-text">{p.first_name} {p.last_name}</td>
-                      <td className="py-3 pr-4"><Badge label={p.position || '—'} variant={positionColor(p.position || '')} /></td>
-                      <td className="py-3 pr-4 font-heading font-bold">{avg?.pts?.toFixed(1) ?? '—'}</td>
-                      <td className="py-3 pr-4 font-heading font-bold">{avg?.reb?.toFixed(1) ?? '—'}</td>
-                      <td className="py-3 pr-4 font-heading font-bold">{avg?.ast?.toFixed(1) ?? '—'}</td>
-                      <td className="py-3 pr-4 text-muted font-body">{avg?.fg_pct ? (avg.fg_pct * 100).toFixed(1) + '%' : '—'}</td>
-                      <td className="py-3 text-muted font-body">{avg?.min ?? '—'}</td>
+                    <tr key={i} className="border-b border-border/50 hover:bg-surface/50 transition-colors">
+                      <td className="py-3 pr-3 font-heading font-bold text-text whitespace-nowrap">{p.name}</td>
+                      <td className="py-3 pr-3"><Badge label={p.pos || '—'} variant={positionColor(p.pos || '')} /></td>
+                      <td className={`py-3 pr-3 font-heading font-bold text-base ${ovrColor(p.ovr)}`}>{p.ovr}</td>
+                      <td className="py-3 pr-3 text-muted font-body">{fmtHeight(p.hgt)}</td>
+                      <td className="py-3 pr-3 text-muted font-body">{p.weight}</td>
+                      <td className="py-3 pr-3 font-heading">{rt?.spd ?? '—'}</td>
+                      <td className="py-3 pr-3 font-heading">{rt?.stre ?? '—'}</td>
+                      <td className="py-3 pr-3 font-heading">{rt?.jmp ?? '—'}</td>
+                      <td className="py-3 pr-3 font-heading">{rt?.fg ?? '—'}</td>
+                      <td className="py-3 pr-3 font-heading">{rt?.tp ?? '—'}</td>
+                      <td className="py-3 pr-3 font-heading">{rt?.ft ?? '—'}</td>
+                      <td className="py-3 pr-3 font-heading">{rt?.blk ?? '—'}</td>
+                      <td className="py-3 pr-3 font-heading">{rt?.stl ?? '—'}</td>
+                      <td className="py-3 pr-3 font-heading">{rt?.reb ?? '—'}</td>
+                      <td className="py-3 text-muted font-body whitespace-nowrap">{fmtContract(p.contract.amount)} / {p.contract.exp}</td>
                     </tr>
                   );
                 })}

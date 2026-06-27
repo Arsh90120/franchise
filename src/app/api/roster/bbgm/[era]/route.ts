@@ -31,7 +31,7 @@ export async function GET(
   }
 
   try {
-    const filePath = path.join(process.cwd(), 'src', fileName);
+    const filePath = path.join(process.cwd(), 'public', 'data', fileName);
     const raw = fs.readFileSync(filePath, 'utf-8');
     const json = JSON.parse(raw);
     const roster = parseBBGM(json);

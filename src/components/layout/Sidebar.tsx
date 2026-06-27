@@ -9,6 +9,7 @@ const nav = [
   { label: 'Dashboard', href: '/', icon: '🏠' },
   { label: 'Roster', href: '/roster', icon: '👥' },
   { label: 'Trade Center', href: '/trades', icon: '🔄' },
+  { label: 'Free Agency', href: '/free-agency', icon: '✍️' },
   { label: 'Sim Engine', href: '/sim', icon: '▶️' },
   { label: 'Draft', href: '/draft', icon: '🎯' },
   { label: 'Analytics', href: '/analytics', icon: '📊' },
@@ -61,7 +62,7 @@ export default function Sidebar() {
         >
           ↩ New Franchise
         </button>
-        <p className="text-xs text-muted/50 font-body px-1">v0.2.0 — Phase 2</p>
+        <p className="text-xs text-muted/50 font-body px-1">v0.2.0 — Phase 4</p>
       </div>
     </aside>
   );

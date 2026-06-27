@@ -8,6 +8,7 @@ export interface BBGMRatings {
 }
 
 export interface BBGMPlayer {
+  id: number;
   name: string;
   pos: string;
   tid: number;
@@ -59,12 +60,12 @@ export function calcOvr(r: BBGMRatings, pos: string): number {
 
 export function parseBBGM(json: { startingSeason: number; players: Record<string, unknown>[] }): BBGMRoster {
   const players: BBGMPlayer[] = json.players
-    .filter((p) => (p.tid as number) >= 0) // exclude free agents tid=-1
-    .map((p) => {
+    .map((p, index) => {
       const rawRatings = (p.ratings as BBGMRatings[])?.[0] ?? {} as BBGMRatings;
       const pos = (p.pos as string) ?? 'F';
       const ovr = calcOvr(rawRatings, pos);
       return {
+        id: index,
         name: p.name as string,
         pos,
         tid: p.tid as number,
