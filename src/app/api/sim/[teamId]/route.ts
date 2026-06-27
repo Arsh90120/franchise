@@ -3,6 +3,8 @@ import { NBA_TEAMS } from '@/lib/nba-teams';
 import { simGame } from '@/lib/sim-engine';
 import { parseBBGM, BBGM_TID_TO_ABB, BBGMRatings } from '@/lib/bbgm-parser';
 import { NextResponse } from 'next/server';
+import path from 'path';
+import fs from 'fs';
 
 const BBGM_ERA_FILE: Record<string, string> = {
   'classic-1985':  'NBA.Legacy.1985.v3.0.beta.json',
@@ -48,13 +50,9 @@ async function getBBGMRoster(era: string, teamAbb: string) {
   const fileName = BBGM_ERA_FILE[era];
   if (!fileName) return null;
 
-  const baseUrl = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : 'http://localhost:3000';
-
-  const res = await fetch(`${baseUrl}/data/${encodeURIComponent(fileName)}`);
-  if (!res.ok) throw new Error(`Failed to fetch ${fileName}: ${res.status}`);
-  const json = await res.json();
+  const filePath = path.join(process.cwd(), 'public', 'data', fileName);
+  const raw = fs.readFileSync(filePath, 'utf-8');
+  const json = JSON.parse(raw);
   const roster = parseBBGM(json);
 
   const tidEntry = Object.entries(BBGM_TID_TO_ABB).find(([, abb]) => abb === teamAbb);

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { NBATeam } from './nba-teams';
 import type { ScheduledGame } from './schedule';
+import type { BBGMPlayer } from './bbgm-parser';
 
 export interface GameState {
   selectedTeam: NBATeam | null;
@@ -14,14 +15,18 @@ export interface GameState {
   gmName: string;
   schedule: ScheduledGame[];
   currentGameIndex: number;
+  leaguePlayers: BBGMPlayer[];
 
   setTeam: (team: NBATeam) => void;
   setEra: (eraId: string, season: number) => void;
   setGmName: (name: string) => void;
-  completeSetup: (schedule: ScheduledGame[]) => void;
+  setLeaguePlayers: (players: BBGMPlayer[]) => void;
+  completeSetup: (schedule: ScheduledGame[], players?: BBGMPlayer[]) => void;
   resetGame: () => void;
   recordGameResult: (gameIndex: number, result: 'W' | 'L', score: string) => void;
   advanceGame: () => void;
+  tradePlayers: (myPlayerIds: number[], cpuPlayerIds: number[], myTid: number, cpuTid: number) => void;
+  signFreeAgent: (playerId: number, teamId: number) => void;
 }
 
 export const useGameState = create<GameState>()(
@@ -37,11 +42,19 @@ export const useGameState = create<GameState>()(
       gmName: 'GM',
       schedule: [],
       currentGameIndex: 0,
+      leaguePlayers: [],
 
       setTeam: (team) => set({ selectedTeam: team }),
       setEra: (eraId, season) => set({ selectedEra: eraId, selectedSeason: season }),
       setGmName: (name) => set({ gmName: name }),
-      completeSetup: (schedule) => set({ isSetupComplete: true, schedule, currentGameIndex: 0 }),
+      setLeaguePlayers: (players) => set({ leaguePlayers: players }),
+      completeSetup: (schedule, players) =>
+        set((s) => ({
+          isSetupComplete: true,
+          schedule,
+          currentGameIndex: 0,
+          leaguePlayers: players ?? s.leaguePlayers,
+        })),
       resetGame: () =>
         set({
           selectedTeam: null,
@@ -53,6 +66,7 @@ export const useGameState = create<GameState>()(
           week: 1,
           schedule: [],
           currentGameIndex: 0,
+          leaguePlayers: [],
         }),
       recordGameResult: (gameIndex, result, score) =>
         set((s) => ({
@@ -66,6 +80,20 @@ export const useGameState = create<GameState>()(
         set((s) => ({
           currentGameIndex: Math.min(s.currentGameIndex + 1, 81),
           week: s.schedule[Math.min(s.currentGameIndex + 1, 81)]?.week ?? s.week,
+        })),
+      tradePlayers: (myPlayerIds, cpuPlayerIds, myTid, cpuTid) =>
+        set((s) => ({
+          leaguePlayers: s.leaguePlayers.map((p) => {
+            if (myPlayerIds.includes(p.id)) return { ...p, tid: cpuTid };
+            if (cpuPlayerIds.includes(p.id)) return { ...p, tid: myTid };
+            return p;
+          }),
+        })),
+      signFreeAgent: (playerId, teamId) =>
+        set((s) => ({
+          leaguePlayers: s.leaguePlayers.map((p) =>
+            p.id === playerId ? { ...p, tid: teamId } : p
+          ),
         })),
     }),
     { name: 'franchise-game-state' }
