@@ -14,9 +14,9 @@ Built with Next.js 14, BallDontLie API, and NVIDIA NIM (Llama 3.3 70B).
 
 ## Build Phases
 - [x] Phase 1 — Scaffold, design system, API layer
-- [ ] Phase 2 — Team select, roster management, salary cap
-- [ ] Phase 3 — Sim engine (box score + text PBP)
-- [ ] Phase 4 — AI trade negotiation
+- [x] Phase 2 — Team select, roster management, salary cap
+- [x] Phase 3 — Sim engine (box score + text PBP)
+- [x] Phase 4 — AI trade negotiation
 - [ ] Phase 5 — CourtFeed + AI narrative events
 - [ ] Phase 6 — Draft + scouting system
 - [ ] Phase 7 — Analytics hub + shot charts
