@@ -42,14 +42,17 @@ export default function Sidebar() {
           <Link
             key={item.href}
             href={item.href}
+            aria-current={pathname === item.href ? 'page' : undefined}
             className={clsx(
-              'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-body transition-colors',
+              'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-body transition-colors focus-visible:ring-2 focus-visible:ring-orange/50 outline-none',
               pathname === item.href
                 ? 'bg-orange/10 text-orange border border-orange/20'
                 : 'text-muted hover:text-text hover:bg-border'
             )}
           >
-            <span className="text-base">{item.icon}</span>
+            <span className="text-base" aria-hidden="true">
+              {item.icon}
+            </span>
             {item.label}
           </Link>
         ))}
@@ -57,10 +60,15 @@ export default function Sidebar() {
 
       <div className="px-4 py-4 border-t border-border space-y-2">
         <button
-          onClick={() => { resetGame(); router.push('/setup'); }}
-          className="w-full text-xs text-muted hover:text-red-400 font-body transition-colors text-left px-1"
+          onClick={() => {
+            if (window.confirm('Are you sure you want to start a new franchise? All current progress will be lost.')) {
+              resetGame();
+              router.push('/setup');
+            }
+          }}
+          className="w-full text-xs text-muted hover:text-red-400 font-body transition-colors text-left px-1 focus-visible:ring-2 focus-visible:ring-orange/50 outline-none rounded"
         >
-          ↩ New Franchise
+          <span aria-hidden="true">↩</span> New Franchise
         </button>
         <p className="text-xs text-muted/50 font-body px-1">v0.2.0 — Phase 2</p>
       </div>
